@@ -1,10 +1,7 @@
-# Frontend AI Context — Transplant Package
 
-This directory is the complete AI context ecosystem for **thinking-canvas-web**
-(the frontend repo). It was authored inside the backend repo because the
-frontend repo did not exist yet — the backend is the source of truth for the
-API contract, and this package was written against the backend's actual
-implemented routes, types, and streaming protocol (not the older design docs).
+
+This directory is the complete AI context ecosystem for **thinking-canvas-frontend**
+
 
 ## How to use this package
 
