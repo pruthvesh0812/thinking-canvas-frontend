@@ -14,6 +14,13 @@ export function PhaseToggle() {
 
   async function flip(next: SessionPhase) {
     if (!sessionId) return
+    // Free-tier heuristic: converging would fire the Stress-Tester, which is
+    // Pro-only. Signal the UpgradePrompt (v1 approach — backend doesn't yet
+    // emit an "agent skipped for tier" event; billing story flags the gap).
+    const tier = useSessionStore.getState().tier
+    if (next === 'converging' && tier === 'free') {
+      window.dispatchEvent(new CustomEvent('tc:upgrade-prompt'))
+    }
     setPhase(next)
     const { error } = await supabase
       .from('sessions')

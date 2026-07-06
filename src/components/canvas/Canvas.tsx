@@ -37,6 +37,7 @@ import { useCanvasPersistence } from '@/hooks/use-canvas-persistence'
 import { useGhostStream } from '@/hooks/use-ghost-stream'
 import { useDebounceIndicator } from '@/hooks/use-debounce-indicator'
 import { logger } from '@/lib/logger'
+import { UpgradePrompt } from '@/components/ui/UpgradePrompt'
 import type { EdgeType } from '@/types'
 
 // Module-scope — recreating these per render forces React Flow to remount
@@ -89,6 +90,16 @@ export function Canvas({ canvasId }: { canvasId: string }) {
   useDebounceIndicator()
 
   const [pending, setPending] = useState<PendingConnection | null>(null)
+  const [showUpgrade, setShowUpgrade] = useState(false)
+
+  useEffect(() => {
+    // Once-per-session prompt: dismissible; re-arms only on next mount.
+    function onPrompt() {
+      setShowUpgrade(true)
+    }
+    window.addEventListener('tc:upgrade-prompt', onPrompt)
+    return () => window.removeEventListener('tc:upgrade-prompt', onPrompt)
+  }, [])
 
   useEffect(() => {
     async function onCommit(e: Event) {
@@ -308,6 +319,7 @@ export function Canvas({ canvasId }: { canvasId: string }) {
           onCancel={() => setPending(null)}
         />
       )}
+      {showUpgrade && <UpgradePrompt onDismiss={() => setShowUpgrade(false)} />}
     </div>
   )
 }

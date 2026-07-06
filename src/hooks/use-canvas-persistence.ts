@@ -217,6 +217,16 @@ export function useCanvasPersistence(canvasId: string) {
       if (cancelled) return
       setSession(sessionId, phase)
 
+      // Tier — read the current row for UpgradePrompt visibility only. Never
+      // gate behaviour on this value (non-negotiable #8).
+      const { data: subRow } = await supabase
+        .from('subscriptions')
+        .select('tier')
+        .maybeSingle<{ tier: 'free' | 'pro' | 'power' }>()
+      if (subRow?.tier && !cancelled) {
+        useSessionStore.getState().setTier(subRow.tier)
+      }
+
       // 2. All nodes + edges for the canvas (every session, not just active).
       const { data: nodeRows } = await supabase
         .from('nodes')

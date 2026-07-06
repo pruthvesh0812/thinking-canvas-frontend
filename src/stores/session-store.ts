@@ -5,6 +5,7 @@ import { create } from 'zustand'
 // ghost pairs (ghost-store).
 
 export type SessionPhase = 'diverging' | 'converging'
+export type Tier = 'free' | 'pro' | 'power'
 
 type CanvasMeta = {
   canvas_id: string
@@ -17,10 +18,12 @@ type SessionStore = {
   session_id: string | null
   current_phase: SessionPhase
   debounce_active_node_id: string | null
+  tier: Tier
 
   setCanvas(canvas: CanvasMeta | null): void
   setSession(session_id: string | null, current_phase?: SessionPhase): void
   setPhase(phase: SessionPhase): void
+  setTier(tier: Tier): void
   setDebounceActive(nodeId: string | null): void
   clearDebounce(): void
   reset(): void
@@ -31,6 +34,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   session_id: null,
   current_phase: 'diverging',
   debounce_active_node_id: null,
+  tier: 'free',
 
   setCanvas(canvas) {
     set({ canvas })
@@ -47,6 +51,10 @@ export const useSessionStore = create<SessionStore>()((set) => ({
     set({ current_phase: phase })
   },
 
+  setTier(tier) {
+    set({ tier })
+  },
+
   setDebounceActive(nodeId) {
     set({ debounce_active_node_id: nodeId })
   },
@@ -61,6 +69,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       session_id: null,
       current_phase: 'diverging',
       debounce_active_node_id: null,
+      tier: 'free',
     })
   },
 }))
