@@ -2,6 +2,8 @@
 
 import { memo } from 'react'
 import type { NodeProps } from '@xyflow/react'
+import { GhostControls } from './GhostControls'
+import type { RejectionReason } from '@/types'
 
 export type GhostQuestionData = {
   questionText: string
@@ -10,6 +12,18 @@ export type GhostQuestionData = {
 }
 
 type Props = NodeProps & { data: GhostQuestionData }
+
+function dispatchDecision(
+  triggerNodeId: string,
+  decision: 'accepted' | 'rejected',
+  reason?: RejectionReason,
+) {
+  window.dispatchEvent(
+    new CustomEvent('ghost:decision', {
+      detail: { triggerNodeId, side: 'question', decision, reason },
+    }),
+  )
+}
 
 export const GhostQuestionNode = memo(function GhostQuestionNode({ data }: Props) {
   return (
@@ -21,6 +35,11 @@ export const GhostQuestionNode = memo(function GhostQuestionNode({ data }: Props
     >
       <div className="mb-1 text-xs uppercase tracking-wide">question</div>
       <div className="whitespace-pre-wrap break-words">{data.questionText}</div>
+      <GhostControls
+        streamed={data.streamed}
+        onAccept={() => dispatchDecision(data.triggerNodeId, 'accepted')}
+        onReject={(reason) => dispatchDecision(data.triggerNodeId, 'rejected', reason)}
+      />
     </div>
   )
 })

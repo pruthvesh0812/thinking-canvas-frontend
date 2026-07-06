@@ -2,7 +2,8 @@
 
 import { memo } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import type { AgentRole, ContextNodeType } from '@/types'
+import { GhostControls } from './GhostControls'
+import type { AgentRole, ContextNodeType, RejectionReason } from '@/types'
 
 // Data attached to a ghost context React Flow node — sourced from the ghost
 // store, projected in Canvas.tsx merge. Streamed text renders live; controls
@@ -18,6 +19,19 @@ export type GhostContextData = {
 }
 
 type Props = NodeProps & { data: GhostContextData }
+
+function dispatchDecision(
+  triggerNodeId: string,
+  side: 'context' | 'question',
+  decision: 'accepted' | 'rejected' | 'acknowledged',
+  reason?: RejectionReason,
+) {
+  window.dispatchEvent(
+    new CustomEvent('ghost:decision', {
+      detail: { triggerNodeId, side, decision, reason },
+    }),
+  )
+}
 
 export const GhostContextNode = memo(function GhostContextNode({ data }: Props) {
   const appreciation = data.isAppreciation
@@ -46,6 +60,13 @@ export const GhostContextNode = memo(function GhostContextNode({ data }: Props) 
       ) : (
         <div className="whitespace-pre-wrap break-words">{data.contextText}</div>
       )}
+      <GhostControls
+        streamed={data.streamed}
+        isAppreciation={appreciation}
+        onAccept={() => dispatchDecision(data.triggerNodeId, 'context', 'accepted')}
+        onReject={(reason) => dispatchDecision(data.triggerNodeId, 'context', 'rejected', reason)}
+        onAcknowledge={() => dispatchDecision(data.triggerNodeId, 'context', 'acknowledged')}
+      />
     </div>
   )
 })

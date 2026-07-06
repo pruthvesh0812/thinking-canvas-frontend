@@ -12,7 +12,8 @@ import {
   type HumanNodeData,
 } from '@/stores/canvas-store'
 import { useSessionStore } from '@/stores/session-store'
-import type { EdgeType } from '@/types'
+import { useGhostStore, type GhostPairState } from '@/stores/ghost-store'
+import type { EdgeType, RejectionReason } from '@/types'
 
 // Owns the write-then-notify loop and canvas hydration.
 // Components + node handlers call the actions returned here — no component
@@ -243,5 +244,156 @@ export function useCanvasPersistence(canvasId: string) {
     }
   }, [canvasId, setCanvas, setSession, setGraph])
 
-  return { persistNode, persistNodeContent, persistNodePosition, persistEdge }
+  // Materialize an accepted ghost pair — write owner:'ai' rows and their
+  // connecting edges to Supabase, then report ghost-status.
+  // ⚠ Do NOT fire POST /api/canvas-event for these rows: the agent pipeline
+  //   must not react to its own output (API-CONTRACT Known Gap #5). Persist
+  //   the parsed contextText/questionText, never the raw stream (Known Gap #6).
+  const resolveGhostPair = useCallback(
+    async (
+      pair: GhostPairState,
+      decision: {
+        context: 'accepted' | 'rejected'
+        question: 'accepted' | 'rejected' | null
+        rejection_reason?: RejectionReason
+      },
+    ) => {
+      const session_id = useSessionStore.getState().session_id
+      if (!session_id) {
+        logger.warn('[persistence] ghost-status with no active session')
+        return
+      }
+
+      const triggerId = pair.descriptor.trigger_node_id
+      const contextGhostId = pair.descriptor.context_node.ghost_id
+      const questionGhostId = pair.descriptor.question_node?.ghost_id ?? null
+
+      // 1. Materialize accepted node(s) and their connecting ghost edges.
+      if (decision.context === 'accepted') {
+        const trigger = useCanvasStore.getState().nodes.find((n) => n.id === triggerId)
+        const anchor = trigger?.position ?? { x: 0, y: 0 }
+        const contextNode: CanvasNode = {
+          id: contextGhostId,
+          type: 'humanNode',
+          position: { x: anchor.x + 260, y: anchor.y - 40 },
+          data: { content: pair.contextText, owner: 'ai' } satisfies HumanNodeData,
+        }
+        useCanvasStore.getState().addNode(contextNode)
+        const { error: cErr } = await supabase.from('nodes').insert({
+          id: contextNode.id,
+          canvas_id: canvasId,
+          session_id,
+          owner: 'ai',
+          content: pair.contextText,
+          position_x: contextNode.position.x,
+          position_y: contextNode.position.y,
+        })
+        if (cErr) {
+          logger.error('[persistence] ghost context materialize failed', { id: contextGhostId, cErr })
+          useCanvasStore.getState().removeNode(contextGhostId)
+        } else {
+          const edge: CanvasEdge = {
+            id: crypto.randomUUID(),
+            source: triggerId,
+            target: contextGhostId,
+            type: `${pair.descriptor.context_edge.edge_type}Edge`,
+            data: { edge_type: pair.descriptor.context_edge.edge_type, both_existing: false },
+          }
+          useCanvasStore.getState().addEdge(edge)
+          await supabase.from('edges').insert({
+            id: edge.id,
+            canvas_id: canvasId,
+            session_id,
+            from_node_id: edge.source,
+            to_node_id: edge.target,
+            edge_type: pair.descriptor.context_edge.edge_type,
+            both_existing: false,
+          })
+        }
+      }
+
+      if (
+        decision.question === 'accepted' &&
+        questionGhostId &&
+        pair.descriptor.question_edge
+      ) {
+        const trigger = useCanvasStore.getState().nodes.find((n) => n.id === triggerId)
+        const anchor = trigger?.position ?? { x: 0, y: 0 }
+        const qNode: CanvasNode = {
+          id: questionGhostId,
+          type: 'humanNode',
+          position: { x: anchor.x + 260, y: anchor.y + 80 },
+          data: { content: pair.questionText, owner: 'ai' } satisfies HumanNodeData,
+        }
+        useCanvasStore.getState().addNode(qNode)
+        const { error: qErr } = await supabase.from('nodes').insert({
+          id: qNode.id,
+          canvas_id: canvasId,
+          session_id,
+          owner: 'ai',
+          content: pair.questionText,
+          position_x: qNode.position.x,
+          position_y: qNode.position.y,
+        })
+        if (qErr) {
+          logger.error('[persistence] ghost question materialize failed', { id: questionGhostId, qErr })
+          useCanvasStore.getState().removeNode(questionGhostId)
+        } else {
+          const qEdge: CanvasEdge = {
+            id: crypto.randomUUID(),
+            source: pair.descriptor.question_edge.from,
+            target: pair.descriptor.question_edge.to,
+            type: `${pair.descriptor.question_edge.edge_type}Edge`,
+            data: {
+              edge_type: pair.descriptor.question_edge.edge_type,
+              both_existing: false,
+            },
+          }
+          useCanvasStore.getState().addEdge(qEdge)
+          await supabase.from('edges').insert({
+            id: qEdge.id,
+            canvas_id: canvasId,
+            session_id,
+            from_node_id: qEdge.source,
+            to_node_id: qEdge.target,
+            edge_type: pair.descriptor.question_edge.edge_type,
+            both_existing: false,
+          })
+        }
+      }
+
+      // 2. Report ghost-status — one call, both statuses. Requires
+      //    thread_id + turn_index from the pair meta (Known Gap #1).
+      if (pair.meta) {
+        await api
+          .ghostStatus({
+            thread_id: pair.meta.thread_id,
+            turn_index: pair.meta.turn_index,
+            canvas_id: canvasId,
+            session_id,
+            context_node_status: decision.context,
+            question_node_status: decision.question,
+            rejection_reason: decision.rejection_reason,
+            interacted_at: Date.now(),
+          })
+          .catch((err) => logger.warn('[persistence] ghost-status failed', { err }))
+      } else {
+        logger.warn('[persistence] ghost-status skipped — no thread_id/turn_index on pair (Gap #1)', {
+          triggerId,
+        })
+      }
+
+      // 3. Drop the pending pair from the ghost store.
+      useGhostStore.getState().resolve(triggerId)
+    },
+    [canvasId],
+  )
+
+  return {
+    persistNode,
+    persistNodeContent,
+    persistNodePosition,
+    persistEdge,
+    resolveGhostPair,
+  }
 }

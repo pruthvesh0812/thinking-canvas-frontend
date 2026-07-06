@@ -77,8 +77,13 @@ export function Canvas({ canvasId }: { canvasId: string }) {
   const ghostPairs = useGhostStore((s) => s.pairs)
   const sessionId = useSessionStore((s) => s.session_id)
 
-  const { persistNode, persistNodeContent, persistNodePosition, persistEdge } =
-    useCanvasPersistence(canvasId)
+  const {
+    persistNode,
+    persistNodeContent,
+    persistNodePosition,
+    persistEdge,
+    resolveGhostPair,
+  } = useCanvasPersistence(canvasId)
 
   useGhostStream(sessionId)
   useDebounceIndicator()
@@ -99,6 +104,53 @@ export function Canvas({ canvasId }: { canvasId: string }) {
     window.addEventListener('canvas:node-commit', onCommit)
     return () => window.removeEventListener('canvas:node-commit', onCommit)
   }, [persistNode, persistNodeContent])
+
+  // Ghost accept/reject/acknowledge — pair actions are dispatched from the
+  // per-node GhostControls so ghost components stay hook-free.
+  useEffect(() => {
+    const pendingDecision: Record<
+      string,
+      { context?: 'accepted' | 'rejected'; question?: 'accepted' | 'rejected' | null; reason?: import('@/types').RejectionReason }
+    > = {}
+
+    async function onDecision(e: Event) {
+      const { triggerNodeId, side, decision, reason } = (e as CustomEvent).detail as {
+        triggerNodeId: string
+        side: 'context' | 'question'
+        decision: 'accepted' | 'rejected' | 'acknowledged'
+        reason?: import('@/types').RejectionReason
+      }
+      const pair = useGhostStore.getState().pairs[triggerNodeId]
+      if (!pair) return
+
+      // Acknowledge (appreciation) = accept context, no question, no reason.
+      if (decision === 'acknowledged') {
+        await resolveGhostPair(pair, { context: 'accepted', question: null })
+        return
+      }
+
+      pendingDecision[triggerNodeId] = pendingDecision[triggerNodeId] ?? {}
+      const entry = pendingDecision[triggerNodeId]
+      if (side === 'context') entry.context = decision
+      else entry.question = decision
+      if (reason) entry.reason = reason
+
+      // Resolve when both sides are in — or when the pair has no question node.
+      const needsQuestion = Boolean(pair.descriptor.question_node)
+      const bothIn = entry.context !== undefined && (!needsQuestion || entry.question !== undefined)
+      if (!bothIn) return
+
+      await resolveGhostPair(pair, {
+        context: entry.context!,
+        question: needsQuestion ? entry.question! : null,
+        rejection_reason: entry.reason,
+      })
+      delete pendingDecision[triggerNodeId]
+    }
+
+    window.addEventListener('ghost:decision', onDecision)
+    return () => window.removeEventListener('ghost:decision', onDecision)
+  }, [resolveGhostPair])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
