@@ -84,3 +84,22 @@ export function sessionComplete(
 export function health(): Promise<HealthResponse> {
   return get<HealthResponse>('/health')
 }
+
+// ⚠ Backend-blocked stub — API-CONTRACT Known Gap #2.
+// observerEdgeStatusSchema exists backend-side but no route implements it yet.
+// This wrapper logs the payload and no-ops until the backend lands
+// POST /api/observer-edge-status; DO NOT invent a substitute endpoint.
+export type ObserverEdgeStatusPayload = {
+  edge_id: string
+  canvas_id: string
+  session_id: string
+  status: 'accepted' | 'rejected'
+  feedback?: 'not_related' | 'wrong_direction' | 'too_indirect' | 'already_obvious'
+}
+
+export async function observerEdgeStatus(
+  payload: ObserverEdgeStatusPayload,
+): Promise<{ ok: true }> {
+  logger.warn('[api] observerEdgeStatus stub (Known Gap #2)', { payload })
+  return { ok: true }
+}

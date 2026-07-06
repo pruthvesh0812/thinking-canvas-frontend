@@ -3,6 +3,12 @@
 import { useEffect, useState } from 'react'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
+import { StructureOverlay } from '@/components/observer/StructureOverlay'
+import {
+  useObserverStore,
+  type ObserverEdge,
+  type ObserverNode,
+} from '@/stores/observer-store'
 
 // Session Complete screen 1 — session_learnings for this session.
 // The Observer pipeline is async; the screen shows a "reading your canvas"
@@ -18,12 +24,57 @@ type SessionLearning = {
 
 type Props = {
   sessionId: string
+  canvasId?: string
   onNext(): void
 }
 
-export function ObserverSuggestions({ sessionId, onNext }: Props) {
+export function ObserverSuggestions({ sessionId, canvasId, onNext }: Props) {
   const [rows, setRows] = useState<SessionLearning[] | null>(null)
   const [waiting, setWaiting] = useState(true)
+  const structures = useObserverStore((s) => s.structures)
+  const setStructures = useObserverStore((s) => s.setStructures)
+
+  // ⚠ Backend-blocked: the observer_structures/observer_edges read path isn't
+  // in the contract yet (API-CONTRACT Known Gap #2). This effect optimistically
+  // reads what tables exist; missing tables surface a warn and the UI falls
+  // back to the flat session_learnings cards below.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { data: structRows, error: sErr } = await supabase
+        .from('observer_structures')
+        .select('id, session_id')
+        .eq('session_id', sessionId)
+        .returns<{ id: string; session_id: string }[]>()
+      if (sErr || !structRows || structRows.length === 0) {
+        if (sErr) logger.warn('[observer] structures load skipped (Gap #2)', { sErr })
+        return
+      }
+      const structureIds = structRows.map((s) => s.id)
+      const { data: nodeRows } = await supabase
+        .from('observer_nodes')
+        .select('id, structure_id, content, level, anchor, materialized')
+        .in('structure_id', structureIds)
+        .returns<(ObserverNode & { structure_id: string })[]>()
+      const { data: edgeRows } = await supabase
+        .from('observer_edges')
+        .select('id, structure_id, from_node_id, to_node_id, level, status')
+        .in('structure_id', structureIds)
+        .returns<(ObserverEdge & { structure_id: string })[]>()
+      if (cancelled) return
+      const byStructure = structRows.map((s) => ({
+        id: s.id,
+        session_id: s.session_id,
+        nodes: (nodeRows ?? []).filter((n) => n.structure_id === s.id),
+        edges: (edgeRows ?? []).filter((e) => e.structure_id === s.id),
+        flagging: false,
+      }))
+      setStructures(byStructure)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, setStructures])
 
   useEffect(() => {
     let cancelled = false
@@ -64,9 +115,18 @@ export function ObserverSuggestions({ sessionId, onNext }: Props) {
       {waiting && (
         <p className="text-sm text-zinc-500">The Observer is reading your canvas…</p>
       )}
-      {rows && rows.length === 0 && (
+      {rows && rows.length === 0 && Object.keys(structures).length === 0 && (
         <p className="text-sm text-zinc-500">No observations from this session.</p>
       )}
+      {canvasId &&
+        Object.values(structures).map((structure) => (
+          <StructureOverlay
+            key={structure.id}
+            structure={structure}
+            canvasId={canvasId}
+            sessionId={sessionId}
+          />
+        ))}
       <ul className="space-y-2">
         {rows?.map((row) => (
           <li

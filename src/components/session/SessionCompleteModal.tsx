@@ -43,7 +43,11 @@ export function SessionCompleteModal({ sessionId, canvasId, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-950">
         {screen === 'observer' && (
-          <ObserverSuggestions sessionId={sessionId} onNext={() => setScreen('unresolved')} />
+          <ObserverSuggestions
+            sessionId={sessionId}
+            canvasId={canvasId}
+            onNext={() => setScreen('unresolved')}
+          />
         )}
         {screen === 'unresolved' && (
           <UnresolvedThreads
