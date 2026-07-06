@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ThinkingCanvas Web
+
+Frontend for ThinkingCanvas — the canvas where a human thinks in nodes and
+edges. Backend (`thinking-canvas-api`) lives in a separate repository.
+
+See `CLAUDE.md` and `IMPLEMENTATION-ORDER.md` for the full agent playbook.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
+cp .env.example .env.local   # fill in real values
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Var | Purpose |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key (RLS is the boundary) |
+| `NEXT_PUBLIC_API_URL` | Backend base URL, e.g. `http://localhost:3001` |
 
-## Learn More
+Never put service-role or Stripe secrets here — `NEXT_PUBLIC_*` ships to the
+browser.
 
-To learn more about Next.js, take a look at the following resources:
+## Route Shells
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `/` — canvas dashboard
+- `/canvas/new` — north star capture (write-once)
+- `/canvas/[canvasId]` — the canvas (React Flow)
+- `/login` — auth
+- `/settings` — account + Stripe portal
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Smoke Test — Backend Health
 
-## Deploy on Vercel
+With the backend running on `NEXT_PUBLIC_API_URL`:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+curl "$NEXT_PUBLIC_API_URL/health"
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The frontend never gates on this endpoint, but a green response confirms the
+backend is reachable before any canvas work.
+
+## Scripts
+
+```bash
+npm run dev     # Next.js dev server (localhost:3000)
+npm run build   # Production build
+npm run lint    # ESLint
+```
+
+## Stack
+
+- Next.js App Router + React 19
+- React Flow (`@xyflow/react`) for the canvas
+- Zustand for client state
+- Supabase (`@supabase/supabase-js` + `@supabase/ssr`) for auth + persistence
+- Tailwind CSS
+- Deployed to Vercel
