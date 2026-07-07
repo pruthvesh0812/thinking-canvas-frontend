@@ -1,4 +1,4 @@
-import { CanvasShell } from './canvas-shell'
+import { Canvas } from '@/components/canvas/Canvas'
 
 export default async function CanvasPage({
   params,
@@ -6,5 +6,5 @@ export default async function CanvasPage({
   params: Promise<{ canvasId: string }>
 }) {
   const { canvasId } = await params
-  return <CanvasShell canvasId={canvasId} />
+  return <Canvas canvasId={canvasId} />
 }
