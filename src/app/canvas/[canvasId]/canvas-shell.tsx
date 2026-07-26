@@ -1,20 +1,12 @@
 'use client'
 
-import { ReactFlow, Background, Controls } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import { Canvas } from '@/components/canvas/Canvas'
 
+// canvasId will select which canvas/session to hydrate once
+// canvas-dashboard/session-lifecycle land (STATE-MANAGEMENT.md — Canvas
+// Hydration). This pass renders the one seeded retention canvas regardless
+// of id.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- canvasId is wired once canvas-dashboard lands
 export function CanvasShell({ canvasId }: { canvasId: string }) {
-  return (
-    <div className="flex h-screen w-full flex-col">
-      <header className="border-b border-zinc-200 px-4 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
-        canvas: {canvasId}
-      </header>
-      <div className="flex-1">
-        <ReactFlow nodes={[]} edges={[]} fitView>
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </div>
-    </div>
-  )
+  return <Canvas />
 }

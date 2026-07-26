@@ -1,0 +1,96 @@
+import { create } from "zustand"
+import type { HumanEdgeType, NodeOwner } from "@/types/mock-contract"
+
+export interface CanvasNodeData extends Record<string, unknown> {
+  content: string
+  owner: NodeOwner
+  /** Persistent marker so an accepted-AI node stays identifiable forever
+   * (CANVAS-RENDERING.md — "Accepted AI nodes ... keep a subtle persistent
+   * marker"). Unset for human nodes. */
+  aiMarker?: boolean
+}
+
+export interface CanvasNode {
+  id: string
+  position: { x: number; y: number }
+  width: number
+  data: CanvasNodeData
+}
+
+export interface CanvasEdge {
+  id: string
+  source: string
+  target: string
+  edgeType: HumanEdgeType
+}
+
+interface CanvasStore {
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+  highlightedNodeId: string | null
+  updateNodePosition: (id: string, position: { x: number; y: number }) => void
+  updateNodeContent: (id: string, content: string) => void
+  setHighlightedNode: (id: string | null) => void
+  /** click-empty-canvas / "+ New node" — empty node in edit mode
+   * (CANVAS-RENDERING.md Canvas Interactions). */
+  addNode: (position: { x: number; y: number }) => CanvasNode
+  /** User-drawn edge via the pen rack — type is picked before the drag, so
+   * there is no post-hoc type popover (design's edge-creation model). */
+  addEdge: (source: string, target: string, edgeType: HumanEdgeType) => void
+  /** Materializes an accepted ghost as a real owner:'ai' node + connecting
+   * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
+  addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+}
+
+// Seeded retention canvas — mirrors the demo scenario in ThinkingCanvas.dc.html
+// turn 1a exactly (same node text, positions, and edge shape) until
+// canvas-dashboard/session-lifecycle land and canvases are loaded for real.
+const SEED_NODES: CanvasNode[] = [
+  { id: "n1", position: { x: 130, y: 110 }, width: 250, data: { content: "Retention drops sharply between day 9 and 11 — before that the curve looks healthy.", owner: "human" } },
+  { id: "n2", position: { x: 170, y: 330 }, width: 260, data: { content: "Onboarding ends on day 7. After that, nothing is scheduled to bring people back.", owner: "human" } },
+  { id: "n3", position: { x: 560, y: 170 }, width: 250, data: { content: "The drop is steepest for users who never invited a teammate.", owner: "human" } },
+  { id: "n4", position: { x: 620, y: 400 }, width: 270, data: { content: "Do referral users survive week 2 better than organic signups?", owner: "human" } },
+  { id: "n5", position: { x: 1010, y: 140 }, width: 240, data: { content: "Week-2 usage is almost entirely solo sessions — teams barely churn.", owner: "human" } },
+  { id: "n6", position: { x: 1060, y: 380 }, width: 190, data: { content: "", owner: "human" } },
+]
+
+const SEED_EDGES: CanvasEdge[] = [
+  { id: "e-n1-n2", source: "n1", target: "n2", edgeType: "logical" },
+  { id: "e-n1-n3", source: "n1", target: "n3", edgeType: "logical" },
+  { id: "e-n3-n5", source: "n3", target: "n5", edgeType: "logical" },
+  { id: "e-n3-n4", source: "n3", target: "n4", edgeType: "question" },
+  { id: "e-n5-n6", source: "n5", target: "n6", edgeType: "question" },
+]
+
+export const useCanvasStore = create<CanvasStore>()((set, get) => ({
+  nodes: SEED_NODES,
+  edges: SEED_EDGES,
+  highlightedNodeId: null,
+  updateNodePosition: (id, position) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+    })),
+  updateNodeContent: (id, content) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, content } } : n)),
+    })),
+  setHighlightedNode: (id) => set({ highlightedNodeId: id }),
+  addNode: (position) => {
+    const node: CanvasNode = {
+      id: crypto.randomUUID(),
+      position,
+      width: 240,
+      data: { content: "", owner: "human" },
+    }
+    set((s) => ({ nodes: [...s.nodes, node] }))
+    return node
+  },
+  addEdge: (source, target, edgeType) => {
+    if (get().edges.some((e) => e.source === source && e.target === target)) return
+    set((s) => ({
+      edges: [...s.edges, { id: crypto.randomUUID(), source, target, edgeType }],
+    }))
+  },
+  addAiNode: (node, edge) =>
+    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+}))
