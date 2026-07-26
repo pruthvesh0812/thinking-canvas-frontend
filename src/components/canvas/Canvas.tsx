@@ -17,6 +17,7 @@ import { useCanvasStore } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore } from "@/stores/ghost-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
+import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
@@ -62,6 +63,10 @@ function CanvasInner() {
   const pairs = useGhostStore((s) => s.pairs)
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
+  // The seeded demo scenario anchors to a specific node id — only offer it
+  // on canvases that actually have that node (a freshly created canvas
+  // starts empty, per north-star capture's resetToEmpty()).
+  const hasInterventionScenario = storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
 
   const nodes = useMemo<Node[]>(() => {
     const humanNodes: HumanFlowNode[] = storeNodes.map((n) => {
@@ -167,31 +172,33 @@ function CanvasInner() {
     <div className="tc-scope flex h-screen w-full flex-col" style={{ background: "var(--tc-surface)" }}>
       <NorthStarHeader />
 
-      <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
-        <button
-          type="button"
-          onClick={trigger}
-          disabled={phase !== "idle"}
-          className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
-          style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
-        >
-          ▶ Run the intervention
-        </button>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded-full px-[13px] py-1 text-xs"
-          style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
-        >
-          Reset
-        </button>
-        <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
-          {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
-          {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
-          {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
-          {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
-        </span>
-      </div>
+      {hasInterventionScenario && (
+        <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
+          <button
+            type="button"
+            onClick={trigger}
+            disabled={phase !== "idle"}
+            className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
+            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
+          >
+            ▶ Run the intervention
+          </button>
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-full px-[13px] py-1 text-xs"
+            style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
+          >
+            Reset
+          </button>
+          <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
+            {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
+            {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
+            {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
+            {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
+          </span>
+        </div>
+      )}
 
       <div className="relative flex-1 overflow-hidden">
         <ReactFlow

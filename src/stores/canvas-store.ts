@@ -40,6 +40,9 @@ interface CanvasStore {
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** North-star capture (2b) pairs this with session-store.startNewCanvas —
+   * a freshly created canvas starts blank, never with the seeded demo graph. */
+  resetToEmpty: () => void
 }
 
 // Seeded retention canvas — mirrors the demo scenario in ThinkingCanvas.dc.html
@@ -93,4 +96,5 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   },
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),
 }))

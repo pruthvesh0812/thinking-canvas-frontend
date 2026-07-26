@@ -18,6 +18,9 @@ export function OpenThreadsRail() {
   const nodes = useCanvasStore((s) => s.nodes)
   const setHighlightedNode = useCanvasStore((s) => s.setHighlightedNode)
   const { setCenter } = useReactFlow()
+  // The seeded demo scenario's threads only make sense while its nodes
+  // exist — a freshly created (empty) canvas has none yet.
+  const threads = THREADS.filter((t) => nodes.some((n) => n.id === t.target))
 
   function jumpTo(targetId: string) {
     const node = nodes.find((n) => n.id === targetId)
@@ -51,7 +54,7 @@ export function OpenThreadsRail() {
           className="flex items-center justify-center rounded-full text-[10px] font-bold text-white"
           style={{ minWidth: 16, height: 16, padding: "0 3px", background: "var(--tc-chrome)" }}
         >
-          {THREADS.length}
+          {threads.length}
         </span>
       </button>
     )
@@ -80,7 +83,7 @@ export function OpenThreadsRail() {
           ×
         </button>
       </div>
-      {THREADS.map((t) => (
+      {threads.map((t) => (
         <div
           key={t.id}
           onClick={() => jumpTo(t.target)}

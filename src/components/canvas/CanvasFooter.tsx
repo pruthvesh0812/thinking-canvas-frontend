@@ -7,6 +7,7 @@ import { useGhostStore } from "@/stores/ghost-store"
 // session-lifecycle), new-node button. No floating toolbars over the
 // canvas itself (design brief).
 export function CanvasFooter() {
+  const canvasTitle = useSessionStore((s) => s.canvasTitle)
   const canvasPosition = useSessionStore((s) => s.canvasPosition)
   const addNode = useCanvasStore((s) => s.addNode)
   const showRejected = useGhostStore((s) => s.showRejected)
@@ -27,7 +28,7 @@ export function CanvasFooter() {
     >
       <div className="flex items-center gap-3">
         <span className="cursor-pointer text-[12.5px]" style={{ color: "#6B6257" }}>
-          Retention ▾
+          {canvasTitle} ▾
         </span>
         <span className="text-[11px]" style={{ color: "#C4BBA9" }}>
           {canvasPosition}
