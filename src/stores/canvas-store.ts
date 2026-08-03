@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { HumanEdgeType, NodeOwner } from "@/types/mock-contract"
+import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 
 export interface CanvasNodeData extends Record<string, unknown> {
   content: string
@@ -8,6 +9,10 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * (CANVAS-RENDERING.md — "Accepted AI nodes ... keep a subtle persistent
    * marker"). Unset for human nodes. */
   aiMarker?: boolean
+  /** The session a node was CREATED in. A node belongs to the canvas, not
+   * the session (CORE-CONCEPTS.md) — this only drives historical
+   * time-travel: viewing session N dims earlier nodes and hides later ones. */
+  sessionNumber: number
 }
 
 export interface CanvasNode {
@@ -49,12 +54,12 @@ interface CanvasStore {
 // turn 1a exactly (same node text, positions, and edge shape) until
 // canvas-dashboard/session-lifecycle land and canvases are loaded for real.
 const SEED_NODES: CanvasNode[] = [
-  { id: "n1", position: { x: 130, y: 110 }, width: 250, data: { content: "Retention drops sharply between day 9 and 11 — before that the curve looks healthy.", owner: "human" } },
-  { id: "n2", position: { x: 170, y: 330 }, width: 260, data: { content: "Onboarding ends on day 7. After that, nothing is scheduled to bring people back.", owner: "human" } },
-  { id: "n3", position: { x: 560, y: 170 }, width: 250, data: { content: "The drop is steepest for users who never invited a teammate.", owner: "human" } },
-  { id: "n4", position: { x: 620, y: 400 }, width: 270, data: { content: "Do referral users survive week 2 better than organic signups?", owner: "human" } },
-  { id: "n5", position: { x: 1010, y: 140 }, width: 240, data: { content: "Week-2 usage is almost entirely solo sessions — teams barely churn.", owner: "human" } },
-  { id: "n6", position: { x: 1060, y: 380 }, width: 190, data: { content: "", owner: "human" } },
+  { id: "n1", position: { x: 130, y: 110 }, width: 250, data: { content: "Retention drops sharply between day 9 and 11 — before that the curve looks healthy.", owner: "human", sessionNumber: 1 } },
+  { id: "n2", position: { x: 170, y: 330 }, width: 260, data: { content: "Onboarding ends on day 7. After that, nothing is scheduled to bring people back.", owner: "human", sessionNumber: 2 } },
+  { id: "n3", position: { x: 560, y: 170 }, width: 250, data: { content: "The drop is steepest for users who never invited a teammate.", owner: "human", sessionNumber: 1 } },
+  { id: "n4", position: { x: 620, y: 400 }, width: 270, data: { content: "Do referral users survive week 2 better than organic signups?", owner: "human", sessionNumber: 3 } },
+  { id: "n5", position: { x: 1010, y: 140 }, width: 240, data: { content: "Week-2 usage is almost entirely solo sessions — teams barely churn.", owner: "human", sessionNumber: 2 } },
+  { id: "n6", position: { x: 1060, y: 380 }, width: 190, data: { content: "", owner: "human", sessionNumber: 3 } },
 ]
 
 const SEED_EDGES: CanvasEdge[] = [
@@ -83,7 +88,7 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
       id: crypto.randomUUID(),
       position,
       width: 240,
-      data: { content: "", owner: "human" },
+      data: { content: "", owner: "human", sessionNumber: CURRENT_SESSION_NUMBER },
     }
     set((s) => ({ nodes: [...s.nodes, node] }))
     return node

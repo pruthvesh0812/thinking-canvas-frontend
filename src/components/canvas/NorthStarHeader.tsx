@@ -1,4 +1,5 @@
 import { useSessionStore } from "@/stores/session-store"
+import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { PhaseToggle } from "./PhaseToggle"
 
 // Fixed, read-only, always visible — the north star, not a form field
@@ -6,6 +7,9 @@ import { PhaseToggle } from "./PhaseToggle"
 export function NorthStarHeader() {
   const originalIntent = useSessionStore((s) => s.originalIntent)
   const sessionNumber = useSessionStore((s) => s.sessionNumber)
+  const viewedSession = useSessionStore((s) => s.viewedSession)
+  const openPastSessions = useCanvasUiStore((s) => s.openPastSessions)
+  const isHistory = viewedSession !== null
 
   return (
     <div
@@ -24,12 +28,21 @@ export function NorthStarHeader() {
           {originalIntent}
         </span>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="text-[11.5px]" style={{ color: "var(--tc-chrome-quiet)" }}>
-          Session {sessionNumber}
-        </span>
-        <PhaseToggle />
-      </div>
+      {!isHistory && (
+        <div className="flex items-center gap-3">
+          {/* Shortcut into session history — opens the rail with past
+              sessions already expanded. */}
+          <button
+            type="button"
+            onClick={openPastSessions}
+            className="-mx-1.5 -my-0.5 rounded px-1.5 py-0.5 text-[11.5px] transition-colors hover:bg-black/[.05]"
+            style={{ background: "none", border: "none", fontFamily: "inherit", color: "var(--tc-chrome-quiet)" }}
+          >
+            Session {sessionNumber} ▾
+          </button>
+          <PhaseToggle />
+        </div>
+      )}
     </div>
   )
 }

@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type EdgeTypes,
   type Node,
@@ -16,6 +17,7 @@ import "@xyflow/react/dist/style.css"
 import { useCanvasStore } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore } from "@/stores/ghost-store"
+import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 
@@ -31,6 +33,8 @@ import { CanvasFooter } from "./CanvasFooter"
 import { PenRack } from "./PenRack"
 import { OpenThreadsRail } from "./OpenThreadsRail"
 import { DebounceIndicator } from "./DebounceIndicator"
+import { HistoryBar } from "./HistoryBar"
+import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
 
 // Registered once, module scope — React Flow re-renders everything if these
 // are recreated per render (CANVAS-RENDERING.md).
@@ -61,15 +65,40 @@ function CanvasInner() {
   const addEdge = useCanvasStore((s) => s.addEdge)
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pairs = useGhostStore((s) => s.pairs)
+  const viewedSession = useSessionStore((s) => s.viewedSession)
+  const insightsMode = useSessionStore((s) => s.insightsMode)
+  const isHistory = viewedSession !== null
+  const { fitView } = useReactFlow()
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
   // starts empty, per north-star capture's resetToEmpty()).
-  const hasInterventionScenario = storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
+  const hasInterventionScenario =
+    !isHistory && storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
+
+  // Honest time-travel: the viewed session at full presence, everything
+  // earlier dimmed as context, everything later absent — it didn't exist
+  // yet, and showing it would misrepresent the trail (design brief).
+  const visibleStoreNodes = useMemo(
+    () => (isHistory ? storeNodes.filter((n) => n.data.sessionNumber <= viewedSession) : storeNodes),
+    [storeNodes, isHistory, viewedSession],
+  )
+
+  // Selecting a past session shows the whole canvas as it stood then — so
+  // frame what survived, reserving the docked panel's width on the right so
+  // no node ends up hidden behind it.
+  useEffect(() => {
+    if (!isHistory || insightsMode === "full") return
+    const timer = setTimeout(
+      () => void fitView({ padding: { top: "12%", bottom: "12%", left: "8%", right: "420px" }, duration: 450 }),
+      60,
+    )
+    return () => clearTimeout(timer)
+  }, [isHistory, viewedSession, insightsMode, fitView])
 
   const nodes = useMemo<Node[]>(() => {
-    const humanNodes: HumanFlowNode[] = storeNodes.map((n) => {
+    const humanNodes: HumanFlowNode[] = visibleStoreNodes.map((n) => {
       const pair = pairs[n.id]
       return {
         id: n.id,
@@ -78,11 +107,17 @@ function CanvasInner() {
         data: {
           ...n.data,
           width: n.width,
-          onRevealPair: pair && !pair.revealed ? revealPair : undefined,
+          onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
+          dimmed: isHistory && n.data.sessionNumber < viewedSession,
+          readOnly: isHistory,
         },
-        draggable: true,
+        draggable: !isHistory,
       }
     })
+
+    // No ghost interaction in the past — the historical view carries none of
+    // the live canvas's affordances.
+    if (isHistory) return humanNodes
 
     const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
@@ -113,15 +148,21 @@ function CanvasInner() {
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [storeNodes, pairs, revealPair])
+  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession])
 
   const edges = useMemo<Edge[]>(() => {
-    const humanEdges: Edge[] = storeEdges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
-    }))
+    const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
+    const humanEdges: Edge[] = storeEdges
+      // An edge whose other end doesn't exist yet would dangle in the past.
+      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
+      .map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
+      }))
+
+    if (isHistory) return humanEdges
 
     const ghostEdges: Edge<GhostEdgeData>[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
@@ -144,32 +185,43 @@ function CanvasInner() {
     }
 
     return [...humanEdges, ...ghostEdges]
-  }, [storeEdges, pairs])
+  }, [storeEdges, pairs, visibleStoreNodes, isHistory])
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
+      if (isHistory) return
       for (const change of changes) {
         if (change.type === "position" && change.position) {
           updateNodePosition(change.id, change.position)
         }
       }
     },
-    [updateNodePosition],
+    [updateNodePosition, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(
     (connection) => {
+      if (isHistory) return
       // Both endpoints already exist on the canvas — this pass has no
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
       // once that gesture exists.
       addEdge(connection.source, connection.target, activePen)
     },
-    [addEdge, activePen],
+    [addEdge, activePen, isHistory],
   )
 
   return (
-    <div className="tc-scope flex h-screen w-full flex-col" style={{ background: "var(--tc-surface)" }}>
+    <div
+      className="tc-scope flex h-screen w-full flex-col"
+      style={{
+        // The past sits on a slightly cooler paper than the live canvas —
+        // felt, not announced.
+        background: isHistory ? "var(--tc-surface-quiet)" : "var(--tc-surface)",
+        transition: "background-color .4s ease",
+      }}
+    >
+      <HistoryBar />
       <NorthStarHeader />
 
       {hasInterventionScenario && (
@@ -208,19 +260,24 @@ function CanvasInner() {
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
+          nodesConnectable={!isHistory}
+          elementsSelectable={!isHistory}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           minZoom={0.4}
           maxZoom={1.75}
           proOptions={{ hideAttribution: true }}
         />
-        <div className="pointer-events-none absolute inset-0">
-          <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
-        </div>
-        <PenRack />
-        <OpenThreadsRail />
+        {!isHistory && (
+          <div className="pointer-events-none absolute inset-0">
+            <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
+          </div>
+        )}
+        {!isHistory && <PenRack />}
+        {!isHistory && <OpenThreadsRail />}
+        <SessionInsightsPanel />
       </div>
 
-      <CanvasFooter />
+      {!isHistory && <CanvasFooter />}
     </div>
   )
 }

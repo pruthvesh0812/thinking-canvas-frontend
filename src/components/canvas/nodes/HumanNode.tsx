@@ -6,7 +6,14 @@ import { useGhostStore } from "@/stores/ghost-store"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useCanvasStore, type CanvasNodeData } from "@/stores/canvas-store"
 
-export type HumanNodeData = CanvasNodeData & { width: number; onRevealPair?: (triggerNodeId: string) => void }
+export type HumanNodeData = CanvasNodeData & {
+  width: number
+  onRevealPair?: (triggerNodeId: string) => void
+  /** Historical view: an earlier session's node, present as context only. */
+  dimmed?: boolean
+  /** Historical view: no editing, no handles, no ghost interaction. */
+  readOnly?: boolean
+}
 export type HumanFlowNode = Node<HumanNodeData, "humanNode">
 
 const HANDLE_STYLE = {
@@ -27,7 +34,8 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
 
   const pair = useGhostStore((s) => s.pairs[id])
   const revealPair = data.onRevealPair
-  const showHalo = !!pair && !pair.revealed
+  const readOnly = !!data.readOnly
+  const showHalo = !readOnly && !!pair && !pair.revealed
   const highlighted = useCanvasStore((s) => s.highlightedNodeId === id)
 
   useEffect(() => {
@@ -57,23 +65,38 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
             : selected
               ? "0 0 0 1.5px rgba(43,38,34,.25)"
               : "0 1px 2px rgba(43,38,34,.07)",
-        cursor: editing ? "text" : "pointer",
+        // Earlier sessions stay present as context but never compete with
+        // the session actually being viewed.
+        opacity: data.dimmed ? 0.25 : 1,
+        cursor: readOnly ? "default" : editing ? "text" : "pointer",
+        transition: "opacity .4s ease",
         animation: showHalo ? "tc-bloom .9s ease-out both" : highlighted ? "tc-fadeup .3s ease-out both" : undefined,
       }}
       onMouseEnter={() => {
+        if (readOnly) return
         setHovered(true)
         if (showHalo) revealPair?.(id)
       }}
       onMouseLeave={() => setHovered(false)}
       onDoubleClick={() => {
+        if (readOnly) return
         setDraft(data.content)
         setEditing(true)
       }}
     >
+      {/* Handles stay mounted even in the read-only historical view —
+          React Flow anchors edges to them, so unmounting them silently
+          drops every edge on the canvas. Read-only just makes them inert. */}
       <Handle
         type="target"
         position={Position.Top}
-        style={{ ...HANDLE_STYLE, opacity: hovered ? 1 : 0, transition: "opacity .15s ease" }}
+        isConnectable={!readOnly}
+        style={{
+          ...HANDLE_STYLE,
+          opacity: !readOnly && hovered ? 1 : 0,
+          pointerEvents: readOnly ? "none" : undefined,
+          transition: "opacity .15s ease",
+        }}
       />
       {editing ? (
         <textarea
@@ -102,7 +125,13 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ ...HANDLE_STYLE, opacity: hovered ? 1 : 0, transition: "opacity .15s ease" }}
+        isConnectable={!readOnly}
+        style={{
+          ...HANDLE_STYLE,
+          opacity: !readOnly && hovered ? 1 : 0,
+          pointerEvents: readOnly ? "none" : undefined,
+          transition: "opacity .15s ease",
+        }}
       />
     </div>
   )

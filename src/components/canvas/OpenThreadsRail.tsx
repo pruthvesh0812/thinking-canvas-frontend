@@ -1,6 +1,8 @@
 import { useReactFlow } from "@xyflow/react"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useCanvasStore } from "@/stores/canvas-store"
+import { useSessionStore } from "@/stores/session-store"
+import { PAST_SESSIONS } from "@/lib/mock-sessions"
 
 const THREADS = [
   { id: "t1", target: "n4", icon: "?", text: "Do referral users survive week 2 better than organic signups?", meta: "open question · unanswered" },
@@ -15,8 +17,11 @@ export function OpenThreadsRail() {
   const open = useCanvasUiStore((s) => s.threadsRailOpen)
   const toggle = useCanvasUiStore((s) => s.toggleThreadsRail)
   const setThreadsRailOpen = useCanvasUiStore((s) => s.setThreadsRailOpen)
+  const pastSessionsExpanded = useCanvasUiStore((s) => s.pastSessionsExpanded)
+  const togglePastSessions = useCanvasUiStore((s) => s.togglePastSessions)
   const nodes = useCanvasStore((s) => s.nodes)
   const setHighlightedNode = useCanvasStore((s) => s.setHighlightedNode)
+  const viewSession = useSessionStore((s) => s.viewSession)
   const { setCenter } = useReactFlow()
   // The seeded demo scenario's threads only make sense while its nodes
   // exist — a freshly created (empty) canvas has none yet.
@@ -30,6 +35,16 @@ export function OpenThreadsRail() {
       setTimeout(() => setHighlightedNode(null), 1800)
     }
     setThreadsRailOpen(false)
+  }
+
+  function openSession(sessionNumber: number) {
+    // The insights panel takes over the right side, so the rail steps aside.
+    setThreadsRailOpen(false)
+    viewSession(sessionNumber)
+  }
+
+  function nodeCountFor(sessionNumber: number) {
+    return nodes.filter((n) => n.data.sessionNumber === sessionNumber).length
   }
 
   if (!open) {
@@ -102,6 +117,55 @@ export function OpenThreadsRail() {
           </div>
         </div>
       ))}
+
+      <div className="mt-auto pt-2.5" style={{ borderTop: "1px solid rgba(43,38,34,.07)" }}>
+        <button
+          type="button"
+          onClick={togglePastSessions}
+          className="flex w-full items-center justify-between py-1.5 hover:opacity-70"
+          style={{ background: "none", border: "none", fontFamily: "inherit" }}
+        >
+          <span
+            className="text-[10px] uppercase"
+            style={{ letterSpacing: ".6px", color: "var(--tc-chrome-quiet)" }}
+          >
+            Past sessions · {PAST_SESSIONS.length}
+          </span>
+          <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
+            {pastSessionsExpanded ? "▴" : "▾"}
+          </span>
+        </button>
+        {pastSessionsExpanded && (
+          <div
+            className="mt-1.5 flex flex-col gap-0.5"
+            style={{ animation: "tc-fadeup .2s ease-out both" }}
+          >
+            {PAST_SESSIONS.map((s) => (
+              <div
+                key={s.number}
+                data-testid={`past-session-${s.number}`}
+                onClick={() => openSession(s.number)}
+                className="flex cursor-pointer flex-col gap-[3px] rounded-lg px-2.5 py-2 hover:bg-black/[.04]"
+              >
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[12.5px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                    Session {s.number}
+                  </span>
+                  <span className="text-[10.5px]" style={{ color: "var(--tc-chrome-faint)" }}>
+                    {s.shortDate}
+                  </span>
+                </div>
+                <div className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
+                  {s.durationMin} min · {nodeCountFor(s.number)} nodes
+                </div>
+                <div className="mt-px text-[11.5px] leading-[1.35]" style={{ color: "var(--tc-chrome)" }}>
+                  {s.description}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
