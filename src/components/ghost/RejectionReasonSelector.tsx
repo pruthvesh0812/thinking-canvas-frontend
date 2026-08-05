@@ -1,5 +1,5 @@
 import { useGhostStore } from "@/stores/ghost-store"
-import type { RejectionReason } from "@/types/mock-contract"
+import type { RejectionReason } from "@/types"
 
 const REASONS: { value: RejectionReason; label: string }[] = [
   { value: "too_abstract", label: "Too abstract" },

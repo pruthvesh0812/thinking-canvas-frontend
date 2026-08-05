@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { HumanEdgeType } from "@/types/mock-contract"
+import type { HumanEdgeType } from "@/stores/canvas-store"
 
 // Ephemeral view state for the canvas chrome — never persisted, never
 // touches Supabase. Kept separate from canvas-store (real graph data) and

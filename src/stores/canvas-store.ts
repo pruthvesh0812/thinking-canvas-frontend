@@ -1,10 +1,15 @@
 import { create } from "zustand"
-import type { HumanEdgeType, NodeOwner } from "@/types/mock-contract"
+import type { EdgeType } from "@/types"
 import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
+
+// The two human-drawable edge types (CORE-CONCEPTS.md) — a restriction of the
+// backend's full EdgeType; `doubt`/`associative` are AI-drawn only and never
+// offered on the pen rack.
+export type HumanEdgeType = Extract<EdgeType, "logical" | "question">
 
 export interface CanvasNodeData extends Record<string, unknown> {
   content: string
-  owner: NodeOwner
+  owner: "human" | "ai"
   /** Persistent marker so an accepted-AI node stays identifiable forever
    * (CANVAS-RENDERING.md — "Accepted AI nodes ... keep a subtle persistent
    * marker"). Unset for human nodes. */

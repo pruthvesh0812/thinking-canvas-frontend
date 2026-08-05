@@ -1,5 +1,5 @@
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
-import type { HumanEdgeType } from "@/types/mock-contract"
+import type { HumanEdgeType } from "@/stores/canvas-store"
 
 // The pen rack: pick a pen before you drag — the connection line renders
 // live in that style, no popover after release

@@ -1,6 +1,6 @@
 import type { Node, NodeProps } from "@xyflow/react"
 import { useGhostStore } from "@/stores/ghost-store"
-import type { ContextNodeType } from "@/types/mock-contract"
+import type { ContextNodeType } from "@/types"
 import { GhostNodeCard } from "./GhostNodeCard"
 
 const BADGE_BY_TYPE: Record<ContextNodeType, string> = {

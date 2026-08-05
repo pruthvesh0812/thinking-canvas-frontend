@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { SessionPhase } from "@/types/mock-contract"
+import type { SessionPhase } from "@/types"
 import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 
 /** How the session insights surface is presented. The same content renders

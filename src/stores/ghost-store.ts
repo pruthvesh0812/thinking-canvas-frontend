@@ -1,5 +1,15 @@
 import { create } from "zustand"
-import type { MockSpawnDescriptor, RejectionReason } from "@/types/mock-contract"
+import type { RejectionReason, SpawnDescriptor } from "@/types"
+
+// The real SpawnDescriptor carries structure only — content arrives later via
+// SSE chunks (GHOST-STREAMING.md). The mock intervention hook has no stream
+// to wait on, so it needs the full text up front; this is that one
+// mock-only augmentation, kept next to the store whose shape depends on it.
+export interface MockSpawnDescriptor {
+  trigger_node_id: string
+  context_node: SpawnDescriptor["context_node"] & { text: string }
+  question_node?: { ghost_id: string; text: string }
+}
 
 export type GhostNodeStatus =
   | "hidden"

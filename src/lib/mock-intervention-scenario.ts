@@ -1,4 +1,4 @@
-import type { MockSpawnDescriptor } from "@/types/mock-contract"
+import type { MockSpawnDescriptor } from "@/stores/ghost-store"
 
 // The one seeded intervention scenario for this pass — anchors to n2
 // ("Onboarding ends on day 7…"). Content matches ThinkingCanvas.dc.html's
