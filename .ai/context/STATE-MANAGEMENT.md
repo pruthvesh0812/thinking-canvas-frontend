@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-07-05
-verified-against: backend canvasEventSchema (write-then-notify contract) + DB table list in backend ARCHITECTURE.md
+last-verified: 2026-08-05
+verified-against: backend canvasEventSchema (write-then-notify contract) + DB table list in backend ARCHITECTURE.md; frontend session-store as built
 stale-after-days: 60
 ---
 
@@ -52,7 +52,7 @@ Two rules fall out of this:
 | `canvas-store` | real nodes + edges (React Flow shapes), positions, selection | ghosts, session meta |
 | `ghost-store` | pending pairs keyed by `trigger_node_id`, streamed text, `streamed` flag | anything persisted |
 | `observer-store` | revealed structures, per-edge accept/reject state | ghost pairs |
-| `session-store` | canvas meta (`original_intent`, title), active session id, `current_phase`, debounce-indicator state | node/edge data |
+| `session-store` | canvas meta (`original_intent`, title), active session id, `current_phase`, Session Complete modal state, carried-forward items, debounce-indicator state | node/edge data |
 
 Cross-store reads happen in hooks/components — stores never import each other.
 

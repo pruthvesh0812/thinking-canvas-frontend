@@ -87,9 +87,10 @@ thinking-canvas-web/
 │   │   │   └── EdgeFeedbackSelector.tsx # not_related | wrong_direction | ...
 │   │   ├── session/
 │   │   │   ├── PhaseToggle.tsx     # diverging / converging manual override
-│   │   │   ├── SessionCompleteModal.tsx # 3-screen flow
+│   │   │   ├── SessionCompleteModal.tsx # 3-screen flow (screen 3 inline)
 │   │   │   ├── ObserverSuggestions.tsx  # screen 1
-│   │   │   └── UnresolvedThreads.tsx    # screen 2
+│   │   │   ├── UnresolvedThreads.tsx    # screen 2
+│   │   │   └── CarriedForwardNode.tsx   # carried threads pre-loaded next session
 │   │   └── ui/
 │   │       └── UpgradePrompt.tsx   # shown when a Pro-only agent would have fired
 │   ├── stores/                     # Zustand — one store per concern
@@ -99,11 +100,13 @@ thinking-canvas-web/
 │   │   └── session-store.ts        # active session, phase, canvas meta
 │   ├── hooks/
 │   │   ├── use-ghost-stream.ts     # EventSource lifecycle + message dispatch
+│   │   ├── use-session-lifecycle.ts# canvas hydration + Observer polling
 │   │   ├── use-canvas-persistence.ts # Supabase writes + POST /api/canvas-event notify
 │   │   └── use-debounce-indicator.ts
 │   ├── lib/
 │   │   ├── supabase.ts             # browser client (anon key — RLS is the boundary)
 │   │   ├── api.ts                  # typed fetch wrappers for every backend endpoint
+│   │   ├── unresolved-threads.ts   # pure screen-2 computation (frontend-owned rule)
 │   │   └── logger.ts               # structured logging — never console.log directly
 │   └── middleware.ts               # auth gate: session 2+ requires an account
 ├── types/

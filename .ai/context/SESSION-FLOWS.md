@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-07-05
-verified-against: backend src/routes/session.ts + src/pipeline/session-complete.ts + TechnicalBuild.docx §6.9/§6.12
+last-verified: 2026-08-05
+verified-against: backend src/routes/session.ts + src/pipeline/session-complete.ts + TechnicalBuild.docx §6.9/§6.12; frontend session-lifecycle story
 stale-after-days: 60
 ---
 
@@ -95,6 +95,19 @@ Click "Session Complete"
 > screen-2 choices as `session_learnings` rows directly from the frontend.
 > Flag this asymmetry when building the story — it may warrant a backend tweak.
 
+**As built** (`session-store.ts` + `src/components/session/`):
+- Screen 1 polls `session_learnings` every 2s for ~30s, then stops waiting —
+  an empty result is a normal outcome (the Observer is Pro-only).
+- Accepting an observation writes a `nodes` row **reusing the learning's id**,
+  then notifies `ghost.accepted` with `agent_role: 'observer'`. The id reuse is
+  what makes "already on the canvas" an exact test at carry-forward time.
+- Screen 2's third action, **Resolve now**, is deliberately in-memory: it means
+  "surface this the moment I'm back on the canvas", not "store it forever".
+  Only Carry Forward writes a row.
+- The screen-2 `session_learnings` insert is not in API-CONTRACT.md's
+  frontend-write list, so RLS may refuse it until the backend honours
+  `carry_forward_ids`. The failure surfaces on screen 3; it is never swallowed.
+
 ---
 
 ## Carry-Forward (next session start)
@@ -103,6 +116,14 @@ On starting a new session on the same canvas, load `session_learnings` rows
 that haven't been resolved and render them as **pre-loaded unresolved nodes** —
 visually distinct from fresh nodes (e.g. a "carried from last session" badge),
 positioned in a dedicated area, ready to continue.
+
+**As built:** the source is the **most recent non-active session only** — the
+badge is literally "carried from last session", and `session_learnings` has no
+resolved/consumed column to walk further back safely. Rows whose id already
+exists in `nodes` (accepted on screen 1) are filtered out. Rendered by
+`CarriedForwardNode` in a dedicated column left of the graph. These are the
+human's own loose ends, not AI suggestions, so the ghost visual contract
+(40-50% opacity, dashed) deliberately does not apply.
 
 ---
 
