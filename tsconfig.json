@@ -19,6 +19,8 @@
       }
     ],
     "paths": {
+      "@/types": ["./types/index.ts"],
+      "@/types/*": ["./types/*"],
       "@/*": ["./src/*"]
     }
   },
