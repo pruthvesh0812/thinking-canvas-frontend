@@ -22,6 +22,9 @@ Then open http://localhost:3000.
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key (RLS is the boundary) |
 | `NEXT_PUBLIC_API_URL` | Backend base URL, e.g. `http://localhost:3001` |
+| `NEXT_PUBLIC_DEV_CANVAS_ID` | DEV-ONLY. UUID of a `canvases` row you create by hand in Supabase — node writes need it until canvas-dashboard lands. |
+| `NEXT_PUBLIC_DEV_SESSION_ID` | DEV-ONLY. UUID of a `sessions` row you create by hand in Supabase — same reason. |
+| `NEXT_PUBLIC_USE_MOCK_PERSISTENCE` | Set to `true` to keep node writes local-only (no Supabase) instead of the real path. |
 
 Never put service-role or Stripe secrets here — `NEXT_PUBLIC_*` ships to the
 browser.
