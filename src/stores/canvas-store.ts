@@ -37,6 +37,10 @@ export interface CanvasEdge {
   source: string
   target: string
   edgeType: HumanEdgeType
+  /** True once this edge has a real Supabase row. An edge drawn to/from a
+   * node that isn't synced yet starts false and stays local-only until a
+   * retry succeeds (use-canvas-persistence.ts — retryPendingEdges). */
+  synced?: boolean
 }
 
 interface CanvasStore {
@@ -61,6 +65,9 @@ interface CanvasStore {
   /** Rollback for a failed Supabase edge write (STATE-MANAGEMENT.md — the
    * store is optimistic, Supabase is authoritative). */
   removeEdge: (id: string) => void
+  /** Flips data.synced true after an edge's first successful Supabase write
+   * (use-canvas-persistence.ts) — never set any other way. */
+  markEdgeSynced: (id: string) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
@@ -123,6 +130,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     return edge
   },
   removeEdge: (id) => set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
+  markEdgeSynced: (id) =>
+    set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, synced: true } : e)) })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),

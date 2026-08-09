@@ -88,6 +88,18 @@ export function useCanvasPersistence() {
     logger.info("[persistence] node persisted to Supabase", { nodeId })
     // TODO(contract-layer): POST /api/canvas-event('node.created') with IDs
     // only, once notifying the backend is turned on.
+
+    retryPendingEdges(nodeId)
+  }
+
+  // Any edge touching this node that stayed local-only because this node
+  // (or possibly still the other end) wasn't synced yet. Runs after every
+  // successful node write, not just the "first" one, since either endpoint
+  // of a pending edge could be the one that was still uncommitted.
+  function retryPendingEdges(nodeId: string) {
+    const { edges } = useCanvasStore.getState()
+    const pending = edges.filter((e) => !e.synced && (e.source === nodeId || e.target === nodeId))
+    for (const edge of pending) attemptEdgeWrite(edge)
   }
 
   function persistEdge(source: string, target: string, edgeType: HumanEdgeType) {
@@ -96,15 +108,19 @@ export function useCanvasPersistence() {
     // drift apart.
     const edge = useCanvasStore.getState().addEdge(source, target, edgeType)
     if (!edge) return // source/target already connected — nothing to persist
+    attemptEdgeWrite(edge)
+  }
 
+  // Shared by persistEdge (right after drawing) and retryPendingEdges (once
+  // a blocking node syncs later) — same guard chain either way.
+  function attemptEdgeWrite(edge: CanvasEdge) {
     const nodes = useCanvasStore.getState().nodes
-    const sourceSynced = nodes.find((n) => n.id === source)?.data.synced ?? false
-    const targetSynced = nodes.find((n) => n.id === target)?.data.synced ?? false
+    const sourceSynced = nodes.find((n) => n.id === edge.source)?.data.synced ?? false
+    const targetSynced = nodes.find((n) => n.id === edge.target)?.data.synced ?? false
     if (!sourceSynced || !targetSynced) {
       // Same rule as node content: stays local-only until both ends are
-      // real Supabase rows. Previously this was attempted and rolled back
-      // on the FK error instead — checking synced up front avoids the
-      // failed round-trip entirely.
+      // real Supabase rows. Whichever node syncs later re-triggers this via
+      // retryPendingEdges — no failed round-trip in the meantime.
       logger.debug("[persistence] edge touches an uncommitted node — staying local only", {
         edgeId: edge.id,
       })
@@ -142,11 +158,16 @@ export function useCanvasPersistence() {
     })
 
     if (error) {
+      // A retried write failing here is a real error (not the FK case —
+      // attemptEdgeWrite already confirmed both ends are synced), so the
+      // same rollback applies even though the edge may have been sitting on
+      // the canvas for a while by the time a retry runs.
       logger.warn("[persistence] edge insert failed, rolling back", { edgeId: edge.id, error })
       useCanvasStore.getState().removeEdge(edge.id)
       return
     }
 
+    useCanvasStore.getState().markEdgeSynced(edge.id)
     logger.info("[persistence] edge persisted to Supabase", { edgeId: edge.id })
     // TODO(contract-layer): POST /api/canvas-event('edge.created') with IDs
     // only, once notifying the backend is turned on.
