@@ -19,6 +19,7 @@ import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
+import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
@@ -62,7 +63,7 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const addEdge = useCanvasStore((s) => s.addEdge)
+  const { persistEdge } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
@@ -206,9 +207,9 @@ function CanvasInner() {
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
       // once that gesture exists.
-      addEdge(connection.source, connection.target, activePen)
+      persistEdge(connection.source, connection.target, activePen)
     },
-    [addEdge, activePen, isHistory],
+    [persistEdge, activePen, isHistory],
   )
 
   return (

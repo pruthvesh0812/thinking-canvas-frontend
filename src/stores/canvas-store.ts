@@ -45,8 +45,14 @@ interface CanvasStore {
    * (CANVAS-RENDERING.md Canvas Interactions). */
   addNode: (position: { x: number; y: number }) => CanvasNode
   /** User-drawn edge via the pen rack — type is picked before the drag, so
-   * there is no post-hoc type popover (design's edge-creation model). */
-  addEdge: (source: string, target: string, edgeType: HumanEdgeType) => void
+   * there is no post-hoc type popover (design's edge-creation model).
+   * Returns the created edge (its client-generated id is what persistence
+   * writes to Supabase), or undefined if source/target were already
+   * connected (dedupe — nothing to persist). */
+  addEdge: (source: string, target: string, edgeType: HumanEdgeType) => CanvasEdge | undefined
+  /** Rollback for a failed Supabase edge write (STATE-MANAGEMENT.md — the
+   * store is optimistic, Supabase is authoritative). */
+  removeEdge: (id: string) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
@@ -99,11 +105,12 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     return node
   },
   addEdge: (source, target, edgeType) => {
-    if (get().edges.some((e) => e.source === source && e.target === target)) return
-    set((s) => ({
-      edges: [...s.edges, { id: crypto.randomUUID(), source, target, edgeType }],
-    }))
+    if (get().edges.some((e) => e.source === source && e.target === target)) return undefined
+    const edge: CanvasEdge = { id: crypto.randomUUID(), source, target, edgeType }
+    set((s) => ({ edges: [...s.edges, edge] }))
+    return edge
   },
+  removeEdge: (id) => set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),

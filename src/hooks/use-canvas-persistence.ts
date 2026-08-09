@@ -1,4 +1,4 @@
-import { useCanvasStore } from "@/stores/canvas-store"
+import { useCanvasStore, type CanvasEdge, type HumanEdgeType } from "@/stores/canvas-store"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
 import type { GhostPairSlot } from "@/stores/ghost-store"
@@ -77,6 +77,58 @@ export function useCanvasPersistence() {
     // only, once notifying the backend is turned on.
   }
 
+  function persistEdge(source: string, target: string, edgeType: HumanEdgeType) {
+    // Store generates the id here (not the hook) so the dedupe check and the
+    // id used for the Supabase write are the same call — no way for them to
+    // drift apart.
+    const edge = useCanvasStore.getState().addEdge(source, target, edgeType)
+    if (!edge) return // source/target already connected — nothing to persist
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] edge created (mock — no Supabase write)", { edgeId: edge.id })
+      return
+    }
+
+    if (!DEV_CANVAS_ID || !DEV_SESSION_ID) {
+      logger.error(
+        "[persistence] NEXT_PUBLIC_DEV_CANVAS_ID / NEXT_PUBLIC_DEV_SESSION_ID not set — skipping Supabase write",
+        { edgeId: edge.id },
+      )
+      return
+    }
+
+    void writeEdge(edge, DEV_CANVAS_ID, DEV_SESSION_ID)
+  }
+
+  async function writeEdge(edge: CanvasEdge, canvasId: string, sessionId: string) {
+    // both_existing is always true today — Canvas.tsx's onConnect only fires
+    // between two nodes already on the canvas; there is no "drag to empty
+    // space creates a child node" gesture yet (STATE-MANAGEMENT.md).
+    const { error } = await supabase.from("edges").insert({
+      id: edge.id,
+      canvas_id: canvasId,
+      session_id: sessionId,
+      from_node_id: edge.source,
+      to_node_id: edge.target,
+      edge_type: edge.edgeType,
+      both_existing: true,
+    })
+
+    if (error) {
+      // Also fires if source/target is a brand-new node whose content was
+      // never committed (STATE-MANAGEMENT.md — nodes persist on first
+      // non-empty blur), since that node row doesn't exist in Supabase yet
+      // to satisfy the FK. Known gap, not handled here.
+      logger.warn("[persistence] edge insert failed, rolling back", { edgeId: edge.id, error })
+      useCanvasStore.getState().removeEdge(edge.id)
+      return
+    }
+
+    logger.info("[persistence] edge persisted to Supabase", { edgeId: edge.id })
+    // TODO(contract-layer): POST /api/canvas-event('edge.created') with IDs
+    // only, once notifying the backend is turned on.
+  }
+
   function materializeGhost(triggerNodeId: string, slot: GhostPairSlot) {
     // TODO(ghost-interaction, contract-layer): Supabase insert of the
     // accepted node (owner:'ai') + connecting edge, then POST
@@ -86,5 +138,5 @@ export function useCanvasPersistence() {
     logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
   }
 
-  return { persistNodeContent, materializeGhost }
+  return { persistNodeContent, persistEdge, materializeGhost }
 }
