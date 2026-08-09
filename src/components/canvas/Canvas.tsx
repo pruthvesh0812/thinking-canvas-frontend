@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -70,6 +70,12 @@ function CanvasInner() {
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
   const { fitView } = useReactFlow()
+  // Nodes are a controlled prop (derived fresh from canvas-store every
+  // render) — React Flow's own internal selection bookkeeping never sticks
+  // unless we apply its "select" changes back in ourselves. Without this,
+  // no node was ever actually `selected`, so the delete key (which only
+  // acts on selected+deletable nodes) silently had nothing to delete.
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
@@ -108,6 +114,7 @@ function CanvasInner() {
         data: {
           ...n.data,
           width: n.width,
+          height: n.height,
           onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
@@ -116,6 +123,7 @@ function CanvasInner() {
         // Delete is a human-only affordance (CANVAS-RENDERING.md) — an
         // accepted AI node keeps its permanent record, never deletable.
         deletable: !isHistory && n.data.owner === "human",
+        selected: selectedNodeIds.has(n.id),
       }
     })
 
@@ -155,7 +163,7 @@ function CanvasInner() {
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession])
+  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession, selectedNodeIds])
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
@@ -166,6 +174,8 @@ function CanvasInner() {
         id: e.id,
         source: e.source,
         target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
         type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
       }))
 
@@ -206,6 +216,13 @@ function CanvasInner() {
           // `deletable: false` set above keeps React Flow from ever
           // emitting this change for them in the first place.
           deleteNode(change.id)
+        } else if (change.type === "select") {
+          setSelectedNodeIds((prev) => {
+            const next = new Set(prev)
+            if (change.selected) next.add(change.id)
+            else next.delete(change.id)
+            return next
+          })
         }
       }
     },
@@ -215,11 +232,18 @@ function CanvasInner() {
   const onConnect: OnConnect = useCallback(
     (connection) => {
       if (isHistory) return
+      if (!connection.source || !connection.target) return
       // Both endpoints already exist on the canvas — this pass has no
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
       // once that gesture exists.
-      persistEdge(connection.source, connection.target, activePen)
+      persistEdge(
+        connection.source,
+        connection.target,
+        activePen,
+        connection.sourceHandle,
+        connection.targetHandle,
+      )
     },
     [persistEdge, activePen, isHistory],
   )

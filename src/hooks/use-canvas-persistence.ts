@@ -102,11 +102,19 @@ export function useCanvasPersistence() {
     for (const edge of pending) attemptEdgeWrite(edge)
   }
 
-  function persistEdge(source: string, target: string, edgeType: HumanEdgeType) {
+  function persistEdge(
+    source: string,
+    target: string,
+    edgeType: HumanEdgeType,
+    sourceHandle?: string | null,
+    targetHandle?: string | null,
+  ) {
     // Store generates the id here (not the hook) so the dedupe check and the
     // id used for the Supabase write are the same call — no way for them to
     // drift apart.
-    const edge = useCanvasStore.getState().addEdge(source, target, edgeType)
+    const edge = useCanvasStore
+      .getState()
+      .addEdge(source, target, edgeType, sourceHandle ?? undefined, targetHandle ?? undefined)
     if (!edge) return // source/target already connected — nothing to persist
     attemptEdgeWrite(edge)
   }

@@ -29,6 +29,11 @@ export interface CanvasNode {
   id: string
   position: { x: number; y: number }
   width: number
+  /** Manual height (HumanNode's bottom-right corner resize). Undefined
+   * means "auto-fit content" — the default; once the user drags the
+   * corner it's set and the node stops shrinking below that value.
+   * Not persisted to Supabase — render-only, like width. */
+  height?: number
   data: CanvasNodeData
 }
 
@@ -37,6 +42,8 @@ export interface CanvasEdge {
   source: string
   target: string
   edgeType: HumanEdgeType
+  sourceHandle?: string
+  targetHandle?: string
   /** True once this edge has a real Supabase row. An edge drawn to/from a
    * node that isn't synced yet starts false and stays local-only until a
    * retry succeeds (use-canvas-persistence.ts — retryPendingEdges). */
@@ -49,6 +56,16 @@ interface CanvasStore {
   highlightedNodeId: string | null
   updateNodePosition: (id: string, position: { x: number; y: number }) => void
   updateNodeContent: (id: string, content: string) => void
+  /** Manual horizontal resize (HumanNode's left/right resize handles and
+   * the bottom-right corner). Not persisted to Supabase — the nodes table
+   * has no width column, this is render-only. */
+  updateNodeWidth: (id: string, width: number) => void
+  /** Manual vertical resize (bottom-right corner). Undefined restores
+   * auto-fit. Not persisted to Supabase — render-only. */
+  updateNodeHeight: (id: string, height: number | undefined) => void
+  /** Combined width+height update from the corner handle — one store
+   * write per drag frame instead of two. */
+  updateNodeSize: (id: string, width: number, height: number) => void
   /** Flips data.synced true after a node's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markNodeSynced: (id: string) => void
@@ -61,7 +78,13 @@ interface CanvasStore {
    * Returns the created edge (its client-generated id is what persistence
    * writes to Supabase), or undefined if source/target were already
    * connected (dedupe — nothing to persist). */
-  addEdge: (source: string, target: string, edgeType: HumanEdgeType) => CanvasEdge | undefined
+  addEdge: (
+    source: string,
+    target: string,
+    edgeType: HumanEdgeType,
+    sourceHandle?: string,
+    targetHandle?: string,
+  ) => CanvasEdge | undefined
   /** Rollback for a failed Supabase edge write (STATE-MANAGEMENT.md — the
    * store is optimistic, Supabase is authoritative). */
   removeEdge: (id: string) => void
@@ -116,6 +139,18 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, content } } : n)),
     })),
+  updateNodeWidth: (id, width) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, width } : n)),
+    })),
+  updateNodeHeight: (id, height) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, height } : n)),
+    })),
+  updateNodeSize: (id, width, height) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, width, height } : n)),
+    })),
   markNodeSynced: (id) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
@@ -131,9 +166,16 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node] }))
     return node
   },
-  addEdge: (source, target, edgeType) => {
+  addEdge: (source, target, edgeType, sourceHandle, targetHandle) => {
     if (get().edges.some((e) => e.source === source && e.target === target)) return undefined
-    const edge: CanvasEdge = { id: crypto.randomUUID(), source, target, edgeType }
+    const edge: CanvasEdge = {
+      id: crypto.randomUUID(),
+      source,
+      target,
+      edgeType,
+      ...(sourceHandle ? { sourceHandle } : {}),
+      ...(targetHandle ? { targetHandle } : {}),
+    }
     set((s) => ({ edges: [...s.edges, edge] }))
     return edge
   },
