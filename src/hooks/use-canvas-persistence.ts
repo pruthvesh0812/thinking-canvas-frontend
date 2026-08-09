@@ -24,10 +24,22 @@ export function useCanvasPersistence() {
   const updateNodeContent = useCanvasStore((s) => s.updateNodeContent)
 
   function persistNodeContent(nodeId: string, content: string) {
-    const previousContent = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)?.data.content
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    const previousContent = node?.data.content
+    const alreadySynced = node?.data.synced ?? false
 
     // Optimistic — the store updates instantly regardless of write path.
     updateNodeContent(nodeId, content)
+
+    // A node with no Supabase row yet and no real text still isn't a
+    // "commit" — stays local-only (STATE-MANAGEMENT.md: persist on first
+    // NON-EMPTY blur, not per keystroke, not on an empty node). A node that
+    // already has a row can legitimately be cleared back to empty — that's
+    // an edit, not a never-committed node, so it still syncs.
+    if (!content.trim() && !alreadySynced) {
+      logger.debug("[persistence] empty node — staying local only, not yet committed", { nodeId })
+      return
+    }
 
     if (USE_MOCK_PERSISTENCE) {
       logger.debug("[persistence] node content updated (mock — no Supabase write)", { nodeId })
@@ -72,6 +84,7 @@ export function useCanvasPersistence() {
       return
     }
 
+    useCanvasStore.getState().markNodeSynced(nodeId)
     logger.info("[persistence] node persisted to Supabase", { nodeId })
     // TODO(contract-layer): POST /api/canvas-event('node.created') with IDs
     // only, once notifying the backend is turned on.
@@ -83,6 +96,20 @@ export function useCanvasPersistence() {
     // drift apart.
     const edge = useCanvasStore.getState().addEdge(source, target, edgeType)
     if (!edge) return // source/target already connected — nothing to persist
+
+    const nodes = useCanvasStore.getState().nodes
+    const sourceSynced = nodes.find((n) => n.id === source)?.data.synced ?? false
+    const targetSynced = nodes.find((n) => n.id === target)?.data.synced ?? false
+    if (!sourceSynced || !targetSynced) {
+      // Same rule as node content: stays local-only until both ends are
+      // real Supabase rows. Previously this was attempted and rolled back
+      // on the FK error instead — checking synced up front avoids the
+      // failed round-trip entirely.
+      logger.debug("[persistence] edge touches an uncommitted node — staying local only", {
+        edgeId: edge.id,
+      })
+      return
+    }
 
     if (USE_MOCK_PERSISTENCE) {
       logger.debug("[persistence] edge created (mock — no Supabase write)", { edgeId: edge.id })
@@ -115,10 +142,6 @@ export function useCanvasPersistence() {
     })
 
     if (error) {
-      // Also fires if source/target is a brand-new node whose content was
-      // never committed (STATE-MANAGEMENT.md — nodes persist on first
-      // non-empty blur), since that node row doesn't exist in Supabase yet
-      // to satisfy the FK. Known gap, not handled here.
       logger.warn("[persistence] edge insert failed, rolling back", { edgeId: edge.id, error })
       useCanvasStore.getState().removeEdge(edge.id)
       return

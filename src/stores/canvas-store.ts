@@ -18,6 +18,11 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * the session (CORE-CONCEPTS.md) — this only drives historical
    * time-travel: viewing session N dims earlier nodes and hides later ones. */
   sessionNumber: number
+  /** True once this node has a real Supabase row. A freshly-added node
+   * (addNode) starts false and stays local-only until its first non-empty
+   * content commit succeeds — never write an empty node to Supabase just
+   * because it exists on the canvas (use-canvas-persistence.ts). */
+  synced?: boolean
 }
 
 export interface CanvasNode {
@@ -40,6 +45,9 @@ interface CanvasStore {
   highlightedNodeId: string | null
   updateNodePosition: (id: string, position: { x: number; y: number }) => void
   updateNodeContent: (id: string, content: string) => void
+  /** Flips data.synced true after a node's first successful Supabase write
+   * (use-canvas-persistence.ts) — never set any other way. */
+  markNodeSynced: (id: string) => void
   setHighlightedNode: (id: string | null) => void
   /** click-empty-canvas / "+ New node" — empty node in edit mode
    * (CANVAS-RENDERING.md Canvas Interactions). */
@@ -92,6 +100,10 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   updateNodeContent: (id, content) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, content } } : n)),
+    })),
+  markNodeSynced: (id) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
     })),
   setHighlightedNode: (id) => set({ highlightedNodeId: id }),
   addNode: (position) => {
