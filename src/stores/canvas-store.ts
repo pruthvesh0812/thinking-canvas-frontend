@@ -68,6 +68,14 @@ interface CanvasStore {
   /** Flips data.synced true after an edge's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markEdgeSynced: (id: string) => void
+  /** Deletes a node and cascades to any edge touching it (local only — the
+   * hook decides whether/how to mirror this to Supabase). Only human-owned
+   * nodes are ever passed here (CANVAS-RENDERING.md — "Delete: only
+   * human-owned elements"). */
+  removeNode: (id: string) => void
+  /** Rollback for a failed Supabase node delete — re-adds the node, and
+   * optionally the edges that were cascaded away with it. */
+  restoreNode: (node: CanvasNode, edges?: CanvasEdge[]) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
@@ -132,6 +140,14 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   removeEdge: (id) => set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
   markEdgeSynced: (id) =>
     set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, synced: true } : e)) })),
+  removeNode: (id) =>
+    set((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== id),
+      edges: s.edges.filter((e) => e.source !== id && e.target !== id),
+      highlightedNodeId: s.highlightedNodeId === id ? null : s.highlightedNodeId,
+    })),
+  restoreNode: (node, edges = []) =>
+    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),

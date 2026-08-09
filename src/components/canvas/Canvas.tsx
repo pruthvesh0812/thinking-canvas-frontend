@@ -63,7 +63,7 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge } = useCanvasPersistence()
+  const { persistEdge, deleteNode } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
@@ -113,6 +113,9 @@ function CanvasInner() {
           readOnly: isHistory,
         },
         draggable: !isHistory,
+        // Delete is a human-only affordance (CANVAS-RENDERING.md) — an
+        // accepted AI node keeps its permanent record, never deletable.
+        deletable: !isHistory && n.data.owner === "human",
       }
     })
 
@@ -133,6 +136,8 @@ function CanvasInner() {
         // draggable, or a global onNode* handler is registered, which would
         // otherwise block hover/click on the ghost's own accept/reject UI.
         selectable: true,
+        // Ghosts are accept/reject only, never deletable (CANVAS-RENDERING.md).
+        deletable: false,
         style: { width: GHOST_LAYOUT.context.width },
       })
       if (pair.question) {
@@ -143,6 +148,7 @@ function CanvasInner() {
           data: { triggerNodeId },
           draggable: false,
           selectable: true,
+          deletable: false,
           style: { width: GHOST_LAYOUT.question.width },
         })
       }
@@ -194,10 +200,16 @@ function CanvasInner() {
       for (const change of changes) {
         if (change.type === "position" && change.position) {
           updateNodePosition(change.id, change.position)
+        } else if (change.type === "remove") {
+          // Selection + Backspace (React Flow's default deleteKeyCode).
+          // deleteNode no-ops for ghost/AI-owned ids on its own, but the
+          // `deletable: false` set above keeps React Flow from ever
+          // emitting this change for them in the first place.
+          deleteNode(change.id)
         }
       }
     },
-    [updateNodePosition, isHistory],
+    [updateNodePosition, deleteNode, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(

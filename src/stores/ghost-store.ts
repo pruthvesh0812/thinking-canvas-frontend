@@ -60,6 +60,10 @@ interface GhostStore {
   requestReject: (triggerNodeId: string, slot: GhostPairSlot) => void
   chooseRejectionReason: (reason: RejectionReason) => void
   toggleShowRejected: () => void
+  /** Drops a pair entirely, no matter its status — used when its trigger
+   * node is deleted (use-canvas-persistence.ts). Cleanup, not a decision
+   * outcome — never call this to "reject" a pair. */
+  dismiss: (triggerNodeId: string) => void
   reset: () => void
 }
 
@@ -158,6 +162,14 @@ export const useGhostStore = create<GhostStore>()((set, get) => ({
     }),
 
   toggleShowRejected: () => set((s) => ({ showRejected: !s.showRejected })),
+
+  dismiss: (triggerNodeId) =>
+    set((s) => {
+      if (!(triggerNodeId in s.pairs)) return s
+      const pairs = { ...s.pairs }
+      delete pairs[triggerNodeId]
+      return { pairs }
+    }),
 
   reset: () => set({ pairs: {}, showRejected: false, pendingRejection: null }),
 }))

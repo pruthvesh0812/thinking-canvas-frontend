@@ -1,7 +1,7 @@
-import { useCanvasStore, type CanvasEdge, type HumanEdgeType } from "@/stores/canvas-store"
+import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
+import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
-import type { GhostPairSlot } from "@/stores/ghost-store"
 
 // Flip to "true" to fall back to the old local-only mock (no Supabase writes)
 // without deleting the real path below — useful if local Supabase is down.
@@ -173,6 +173,82 @@ export function useCanvasPersistence() {
     // only, once notifying the backend is turned on.
   }
 
+  function deleteNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    // Ghost ids never appear in canvas-store (no-op by lookup failing), and
+    // AI-owned nodes are excluded by design (CANVAS-RENDERING.md — delete is
+    // "only human-owned elements") — both land here as a no-op rather than
+    // needing a special case at the call site.
+    if (!node || node.data.owner !== "human") return
+
+    const connectedEdges = useCanvasStore.getState().edges.filter(
+      (e) => e.source === nodeId || e.target === nodeId,
+    )
+
+    // Optimistic — the store cascades the connected edges itself. Also drop
+    // any pending ghost pair keyed to this node: it would otherwise keep
+    // floating with a trigger that no longer exists. This is cleanup, not a
+    // reject decision, so it goes through dismiss, not requestReject.
+    useCanvasStore.getState().removeNode(nodeId)
+    useGhostStore.getState().dismiss(nodeId)
+
+    if (!node.data.synced) {
+      // Never had a Supabase row — and per the sync rule, neither did any
+      // edge that only ever touched it — so there's nothing to delete
+      // server-side.
+      logger.debug("[persistence] uncommitted node removed locally only", { nodeId })
+      return
+    }
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] node removed (mock — no Supabase write)", { nodeId })
+      return
+    }
+
+    if (!DEV_CANVAS_ID || !DEV_SESSION_ID) {
+      logger.error(
+        "[persistence] NEXT_PUBLIC_DEV_CANVAS_ID / NEXT_PUBLIC_DEV_SESSION_ID not set — skipping Supabase write",
+        { nodeId },
+      )
+      return
+    }
+
+    void writeNodeDelete(node, connectedEdges)
+  }
+
+  async function writeNodeDelete(node: CanvasNode, connectedEdges: CanvasEdge[]) {
+    // Edges first: deleting the node while a synced edge still references it
+    // would fail the FK. Not transactional — see the comment below for what
+    // happens if the node delete fails after this step succeeds.
+    const syncedEdgeIds = connectedEdges.filter((e) => e.synced).map((e) => e.id)
+    if (syncedEdgeIds.length > 0) {
+      const { error: edgeError } = await supabase.from("edges").delete().in("id", syncedEdgeIds)
+      if (edgeError) {
+        logger.warn("[persistence] failed to delete connected edges, restoring node", {
+          nodeId: node.id,
+          error: edgeError,
+        })
+        useCanvasStore.getState().restoreNode(node, connectedEdges)
+        return
+      }
+    }
+
+    const { error } = await supabase.from("nodes").delete().eq("id", node.id)
+    if (error) {
+      // Connected edges may already be gone from Supabase by this point (the
+      // two deletes aren't wrapped in one transaction) — restoring them
+      // locally here would misrepresent server state, so only the node
+      // itself comes back.
+      logger.warn("[persistence] node delete failed, restoring node", { nodeId: node.id, error })
+      useCanvasStore.getState().restoreNode(node)
+      return
+    }
+
+    logger.info("[persistence] node deleted from Supabase", { nodeId: node.id })
+    // TODO(contract-layer): there is no node.deleted canvas-event yet
+    // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
+  }
+
   function materializeGhost(triggerNodeId: string, slot: GhostPairSlot) {
     // TODO(ghost-interaction, contract-layer): Supabase insert of the
     // accepted node (owner:'ai') + connecting edge, then POST
@@ -182,5 +258,5 @@ export function useCanvasPersistence() {
     logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
   }
 
-  return { persistNodeContent, persistEdge, materializeGhost }
+  return { persistNodeContent, persistEdge, deleteNode, materializeGhost }
 }
