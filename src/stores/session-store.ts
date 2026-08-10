@@ -8,6 +8,12 @@ import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 export type InsightsMode = "sidebar" | "full"
 
 interface SessionStore {
+  /** The real Supabase ids of the canvas currently open and its active
+   * session. null until a real canvas is hydrated (use-canvas-hydration.ts);
+   * the persistence hook reads these to hang node/edge writes off the actual
+   * canvas/session instead of dev env vars. */
+  canvasId: string | null
+  sessionId: string | null
   originalIntent: string
   canvasTitle: string
   sessionNumber: number
@@ -21,6 +27,15 @@ interface SessionStore {
   viewSession: (sessionNumber: number) => void
   setInsightsMode: (mode: InsightsMode) => void
   returnToLive: () => void
+  /** Sets the real canvas/session context after hydrating a canvas from
+   * Supabase (use-canvas-hydration.ts). original_intent stays write-once —
+   * this only ever loads it, never offers an edit (non-negotiable #5). */
+  loadCanvas: (meta: {
+    canvasId: string
+    sessionId: string
+    originalIntent: string
+    title: string
+  }) => void
   /** North-star capture (2b) — write-once at canvas creation. Starts a
    * brand-new canvas's session at 1; the canvas surface pairs this with
    * canvas-store.resetToEmpty() so a fresh canvas never shows seeded nodes. */
@@ -30,6 +45,8 @@ interface SessionStore {
 // original_intent is write-once at canvas creation (session-lifecycle story) —
 // read-only here, never an edit affordance (CODING-STANDARDS.md non-negotiable #5).
 export const useSessionStore = create<SessionStore>()((set) => ({
+  canvasId: null,
+  sessionId: null,
   originalIntent: "Why is our user retention dropping after week 2?",
   canvasTitle: "Retention",
   sessionNumber: CURRENT_SESSION_NUMBER,
@@ -43,6 +60,16 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   viewSession: (sessionNumber) => set({ viewedSession: sessionNumber, insightsMode: "sidebar" }),
   setInsightsMode: (mode) => set({ insightsMode: mode }),
   returnToLive: () => set({ viewedSession: null, insightsMode: "sidebar" }),
+  loadCanvas: ({ canvasId, sessionId, originalIntent, title }) =>
+    set({
+      canvasId,
+      sessionId,
+      originalIntent,
+      canvasTitle: title,
+      viewedSession: null,
+      insightsMode: "sidebar",
+      phase: "diverging",
+    }),
   startNewCanvas: (originalIntent) =>
     set({
       originalIntent,

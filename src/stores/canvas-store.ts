@@ -102,6 +102,10 @@ interface CanvasStore {
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** Replaces the whole graph with rows loaded from Supabase
+   * (use-canvas-hydration.ts). Everything passed here is already durable, so
+   * callers mark it synced:true — never re-persist a hydrated row. */
+  hydrate: (nodes: CanvasNode[], edges: CanvasEdge[]) => void
   /** North-star capture (2b) pairs this with session-store.startNewCanvas —
    * a freshly created canvas starts blank, never with the seeded demo graph. */
   resetToEmpty: () => void
@@ -192,5 +196,6 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  hydrate: (nodes, edges) => set({ nodes, edges, highlightedNodeId: null }),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),
 }))

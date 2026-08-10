@@ -106,8 +106,13 @@ time, they are never recomputed server-side:
 
 ### Position changes
 
-Node positions persist to Supabase (debounced, e.g. on drag end) but do **not**
-fire `canvas-event` — position is not a thinking event.
+⚠ The `nodes` table has **no position or width columns** (see
+`types/database.types.ts`) — node layout is NOT persisted server-side. Drag
+positions live only in `canvas-store` for the session; on re-entry
+`use-canvas-hydration.ts` generates a grid layout instead. Restoring saved
+positions is blocked on the backend adding position columns. (When it does:
+persist debounced on drag end, and do **not** fire `canvas-event` — position
+is not a thinking event.)
 
 ### Edits / deletes
 

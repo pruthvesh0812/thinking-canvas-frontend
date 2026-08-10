@@ -1,19 +1,45 @@
 'use client'
 
+import Link from 'next/link'
 import { Canvas } from '@/components/canvas/Canvas'
-import { useAnonymousAuth } from '@/hooks/use-anonymous-auth'
+import { useCanvasHydration } from '@/hooks/use-canvas-hydration'
 
-// canvasId will select which canvas/session to hydrate once
-// canvas-dashboard/session-lifecycle land (STATE-MANAGEMENT.md — Canvas
-// Hydration). This pass renders the one seeded retention canvas regardless
-// of id.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- canvasId is wired once canvas-dashboard lands
+// Loads the real canvas addressed by the route (its nodes/edges, active
+// session, north star) before rendering the surface. Hydration also owns the
+// anonymous sign-in that RLS needs, so there's no separate auth call here.
+// In mock mode the hook no-ops and reports ready immediately, leaving the
+// seeded demo graph in canvas-store.
 export function CanvasShell({ canvasId }: { canvasId: string }) {
-  // Scoped here (not the root layout): this is the one surface that writes
-  // to Supabase today, and every write needs a real auth.uid() for RLS to
-  // pass (auth story #9, pulled forward — see .ai/features/auth/story.md).
-  // Keeping it off the root layout also keeps supabase.ts out of the static
-  // prerender path for pages that don't need it (/, /login, /settings).
-  useAnonymousAuth()
+  const status = useCanvasHydration(canvasId)
+
+  if (status === 'loading') {
+    return (
+      <main
+        className="tc-scope flex min-h-screen items-center justify-center"
+        style={{ background: 'var(--tc-surface)' }}
+      >
+        <span className="text-[13px]" style={{ color: 'var(--tc-chrome-quiet)' }}>
+          Loading canvas…
+        </span>
+      </main>
+    )
+  }
+
+  if (status === 'not-found' || status === 'error') {
+    return (
+      <main
+        className="tc-scope flex min-h-screen flex-col items-center justify-center gap-4"
+        style={{ background: 'var(--tc-surface)' }}
+      >
+        <span className="text-[14px]" style={{ color: 'var(--tc-ink)' }}>
+          {status === 'not-found' ? "This canvas doesn't exist or isn't yours." : 'Something went wrong loading this canvas.'}
+        </span>
+        <Link href="/" className="text-[12.5px]" style={{ color: 'var(--tc-chrome-quiet)' }}>
+          ← back to canvases
+        </Link>
+      </main>
+    )
+  }
+
   return <Canvas />
 }

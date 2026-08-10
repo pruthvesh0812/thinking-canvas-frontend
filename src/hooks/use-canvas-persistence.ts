@@ -1,5 +1,6 @@
 import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
 import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
+import { useSessionStore } from "@/stores/session-store"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
 
@@ -7,14 +8,23 @@ import { logger } from "@/lib/logger"
 // without deleting the real path below — useful if local Supabase is down.
 const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
 
-// DEV-ONLY: canvas-dashboard/session-lifecycle haven't landed, so there is no
-// real canvas/session yet to hang node writes off. `sessions` rows may only
-// ever come from POST /api/session/start (STATE-MANAGEMENT.md) — never
-// inserted directly — so until that call is wired in, these env vars point
-// at a canvas + session row you create by hand in Supabase for local testing.
-// Delete this block once canvas-dashboard/session-lifecycle land.
+// Fallback dev ids for testing a single canvas without the create/hydrate
+// flow (a canvas + session row made by hand in Supabase). The real path now
+// reads the hydrated canvas/session from session-store; these only fill in
+// when nothing has been hydrated yet.
 const DEV_CANVAS_ID = process.env.NEXT_PUBLIC_DEV_CANVAS_ID
 const DEV_SESSION_ID = process.env.NEXT_PUBLIC_DEV_SESSION_ID
+
+// The canvas/session a write belongs to: whatever real canvas is currently
+// hydrated (session-store), falling back to the dev env vars. Returns null
+// only when neither is available — the caller then skips the Supabase write.
+function currentIds(): { canvasId: string; sessionId: string } | null {
+  const { canvasId, sessionId } = useSessionStore.getState()
+  const resolvedCanvas = canvasId ?? DEV_CANVAS_ID
+  const resolvedSession = sessionId ?? DEV_SESSION_ID
+  if (!resolvedCanvas || !resolvedSession) return null
+  return { canvasId: resolvedCanvas, sessionId: resolvedSession }
+}
 
 // The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to notify
 // yet — canvas-core/contract-layer haven't landed, so the Supabase write
@@ -46,17 +56,15 @@ export function useCanvasPersistence() {
       return
     }
 
-    if (!DEV_CANVAS_ID || !DEV_SESSION_ID) {
-      logger.error(
-        "[persistence] NEXT_PUBLIC_DEV_CANVAS_ID / NEXT_PUBLIC_DEV_SESSION_ID not set — skipping Supabase write",
-        { nodeId },
-      )
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase write", { nodeId })
       return
     }
 
     // Fire-and-forget: never block the canvas render on the round-trip
     // (same rule as api.ts's canvasEvent).
-    void writeNodeContent(nodeId, content, previousContent, DEV_CANVAS_ID, DEV_SESSION_ID)
+    void writeNodeContent(nodeId, content, previousContent, ids.canvasId, ids.sessionId)
   }
 
   async function writeNodeContent(
@@ -140,15 +148,13 @@ export function useCanvasPersistence() {
       return
     }
 
-    if (!DEV_CANVAS_ID || !DEV_SESSION_ID) {
-      logger.error(
-        "[persistence] NEXT_PUBLIC_DEV_CANVAS_ID / NEXT_PUBLIC_DEV_SESSION_ID not set — skipping Supabase write",
-        { edgeId: edge.id },
-      )
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase write", { edgeId: edge.id })
       return
     }
 
-    void writeEdge(edge, DEV_CANVAS_ID, DEV_SESSION_ID)
+    void writeEdge(edge, ids.canvasId, ids.sessionId)
   }
 
   async function writeEdge(edge: CanvasEdge, canvasId: string, sessionId: string) {
@@ -213,11 +219,11 @@ export function useCanvasPersistence() {
       return
     }
 
-    if (!DEV_CANVAS_ID || !DEV_SESSION_ID) {
-      logger.error(
-        "[persistence] NEXT_PUBLIC_DEV_CANVAS_ID / NEXT_PUBLIC_DEV_SESSION_ID not set — skipping Supabase write",
-        { nodeId },
-      )
+    // Deletes are by id (RLS-scoped), so writeNodeDelete doesn't need the
+    // ids — this only confirms we're in a real canvas context before hitting
+    // the network at all.
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", { nodeId })
       return
     }
 
