@@ -78,12 +78,20 @@ export function useCanvasPersistence() {
     // commit (creation) and every later edit (STATE-MANAGEMENT.md
     // "Persistence Patterns" — creation and edits are the same shape here,
     // and the id is always client-generated up front).
+    // Layout (x/y/width/height) rides along so a node's very first row
+    // already carries its position — the frontend owns these columns; the
+    // backend never reads them (layout contract update, 2026-08-11).
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
     const { error } = await supabase.from("nodes").upsert({
       id: nodeId,
       canvas_id: canvasId,
       session_id: sessionId,
       owner: "human",
       content,
+      x: node?.position.x ?? null,
+      y: node?.position.y ?? null,
+      width: node?.width ?? null,
+      height: node?.height ?? null,
     })
 
     if (error) {
@@ -98,6 +106,48 @@ export function useCanvasPersistence() {
     // only, once notifying the backend is turned on.
 
     retryPendingEdges(nodeId)
+  }
+
+  // Move / resize commit — persist x/y/width/height for a node that already
+  // has a Supabase row. Spatial-only: no content touched, no canvas-event
+  // (the backend is intentionally blind to layout — it never invalidates a
+  // fingerprint or wakes an agent). A node not yet synced is skipped: its
+  // layout gets written with the first content commit (writeNodeContent),
+  // so there's nothing to persist here until then.
+  function persistNodeLayout(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    if (!node || !node.data.synced) return
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] node layout changed (mock — no Supabase write)", { nodeId })
+      return
+    }
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping layout write", { nodeId })
+      return
+    }
+
+    void writeNodeLayout(nodeId, node.position.x, node.position.y, node.width, node.height ?? null)
+  }
+
+  async function writeNodeLayout(
+    nodeId: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number | null,
+  ) {
+    // update, not upsert — the row exists (synced check above), and an update
+    // touches only these four columns, never content/owner.
+    const { error } = await supabase.from("nodes").update({ x, y, width, height }).eq("id", nodeId)
+    if (error) {
+      // No rollback: snapping a node back to a stale position mid-work is
+      // more jarring than a lost layout write. Log and move on — the next
+      // move/resize commit will try again.
+      logger.warn("[persistence] node layout write failed", { nodeId, error })
+      return
+    }
+    logger.debug("[persistence] node layout persisted", { nodeId })
   }
 
   // Any edge touching this node that stayed local-only because this node
@@ -272,5 +322,5 @@ export function useCanvasPersistence() {
     logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
   }
 
-  return { persistNodeContent, persistEdge, deleteNode, materializeGhost }
+  return { persistNodeContent, persistNodeLayout, persistEdge, deleteNode, materializeGhost }
 }

@@ -57,7 +57,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(data.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { persistNodeContent } = useCanvasPersistence()
+  const { persistNodeContent, persistNodeLayout } = useCanvasPersistence()
   const updateNodeWidth = useCanvasStore((s) => s.updateNodeWidth)
   const updateNodeSize = useCanvasStore((s) => s.updateNodeSize)
 
@@ -129,6 +129,12 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   function onCornerResize(_: unknown, params: ResizeParamsWithDirection) {
     // Corner handle drives both axes in one store write — see updateNodeSize.
     updateNodeSize(id, params.width, params.height)
+  }
+
+  // Persist once the drag ends, not per frame — mirrors the move-commit
+  // rule in Canvas.tsx's onNodesChange (spatial-only, no backend notify).
+  function onResizeEnd() {
+    persistNodeLayout(id)
   }
 
   const isEmpty = !data.content.trim() && !editing
@@ -213,6 +219,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
             maxWidth={MAX_WIDTH}
             style={{ ...RESIZE_LINE_STYLE, cursor: "ew-resize" }}
             onResize={onResize}
+            onResizeEnd={onResizeEnd}
           />
           <NodeResizeControl
             nodeId={id}
@@ -223,6 +230,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
             maxWidth={MAX_WIDTH}
             style={{ ...RESIZE_LINE_STYLE, cursor: "ew-resize" }}
             onResize={onResize}
+            onResizeEnd={onResizeEnd}
           />
           {/* Bottom-right corner — the only two-axis handle. Drawn as a
               small dog-ear fold that sits at the card corner and fades in
@@ -244,6 +252,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
               transform: "translate(2px, 2px)",
             }}
             onResize={onCornerResize}
+            onResizeEnd={onResizeEnd}
           >
             <svg
               viewBox="0 0 10 10"

@@ -63,7 +63,7 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, deleteNode } = useCanvasPersistence()
+  const { persistEdge, deleteNode, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
@@ -208,8 +208,12 @@ function CanvasInner() {
     (changes) => {
       if (isHistory) return
       for (const change of changes) {
-        if (change.type === "position" && change.position) {
-          updateNodePosition(change.id, change.position)
+        if (change.type === "position") {
+          // Every frame updates the store for a smooth drag; the commit
+          // (React Flow sends a final change with dragging=false) is the
+          // one we persist — one layout write per drag, not per frame.
+          if (change.position) updateNodePosition(change.id, change.position)
+          if (change.dragging === false) persistNodeLayout(change.id)
         } else if (change.type === "remove") {
           // Selection + Backspace (React Flow's default deleteKeyCode).
           // deleteNode no-ops for ghost/AI-owned ids on its own, but the
@@ -226,7 +230,7 @@ function CanvasInner() {
         }
       }
     },
-    [updateNodePosition, deleteNode, isHistory],
+    [updateNodePosition, persistNodeLayout, deleteNode, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(

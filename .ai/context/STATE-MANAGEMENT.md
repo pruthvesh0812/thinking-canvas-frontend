@@ -104,15 +104,16 @@ time, they are never recomputed server-side:
 - `edge_type` — from the EdgeTypeSelector
 - `both_existing` — true ⇔ drawn between two already-existing nodes
 
-### Position changes
+### Position / size changes
 
-⚠ The `nodes` table has **no position or width columns** (see
-`types/database.types.ts`) — node layout is NOT persisted server-side. Drag
-positions live only in `canvas-store` for the session; on re-entry
-`use-canvas-hydration.ts` generates a grid layout instead. Restoring saved
-positions is blocked on the backend adding position columns. (When it does:
-persist debounced on drag end, and do **not** fire `canvas-event` — position
-is not a thinking event.)
+Node layout persists to the `nodes` table's `x`/`y`/`width`/`height` columns
+(all nullable — the frontend owns them, the backend never reads them). Written
+on create (they ride along in `writeNodeContent`'s upsert) and on every
+move/resize **commit** — drag end / resize end, not per frame
+(`persistNodeLayout`). No `canvas-event` — layout is not a thinking event and
+the backend is intentionally blind to it. On re-entry `use-canvas-hydration.ts`
+restores the saved layout, falling back to a grid only for pre-migration rows
+whose columns are still null.
 
 ### Edits / deletes
 

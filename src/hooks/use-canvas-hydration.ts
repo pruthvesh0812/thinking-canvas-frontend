@@ -109,7 +109,11 @@ export function useCanvasHydration(canvasId: string) {
       // 3. Nodes + edges for the whole canvas (every session — nodes belong
       //    to the canvas, not the session).
       const [{ data: nodeRows, error: nodesError }, { data: edgeRows, error: edgesError }] = await Promise.all([
-        supabase.from("nodes").select("id, content, owner").eq("canvas_id", canvasId).order("created_at"),
+        supabase
+          .from("nodes")
+          .select("id, content, owner, x, y, width, height")
+          .eq("canvas_id", canvasId)
+          .order("created_at"),
         supabase.from("edges").select("id, from_node_id, to_node_id, edge_type").eq("canvas_id", canvasId),
       ])
 
@@ -122,8 +126,11 @@ export function useCanvasHydration(canvasId: string) {
 
       const nodes: CanvasNode[] = (nodeRows ?? []).map((row, i) => ({
         id: row.id,
-        position: gridPosition(i),
-        width: DEFAULT_WIDTH,
+        // Saved layout when present; grid fallback only for pre-migration
+        // rows that never stored x/y (all four columns are nullable).
+        position: row.x != null && row.y != null ? { x: row.x, y: row.y } : gridPosition(i),
+        width: row.width ?? DEFAULT_WIDTH,
+        height: row.height ?? undefined,
         data: {
           content: row.content ?? "",
           owner: row.owner === "ai" ? "ai" : "human",
