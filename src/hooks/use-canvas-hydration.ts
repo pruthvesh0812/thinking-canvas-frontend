@@ -114,7 +114,10 @@ export function useCanvasHydration(canvasId: string) {
           .select("id, content, owner, x, y, width, height")
           .eq("canvas_id", canvasId)
           .order("created_at"),
-        supabase.from("edges").select("id, from_node_id, to_node_id, edge_type").eq("canvas_id", canvasId),
+        supabase
+          .from("edges")
+          .select("id, from_node_id, to_node_id, from_handle, to_handle, edge_type")
+          .eq("canvas_id", canvasId),
       ])
 
       if (cancelled) return
@@ -144,6 +147,10 @@ export function useCanvasHydration(canvasId: string) {
         id: row.id,
         source: row.from_node_id,
         target: row.to_node_id,
+        // Stored uppercase; React Flow's handle ids are lowercase. Undefined
+        // (null column, pre-migration rows) lets React Flow pick a default side.
+        sourceHandle: row.from_handle?.toLowerCase() ?? undefined,
+        targetHandle: row.to_handle?.toLowerCase() ?? undefined,
         edgeType: toHumanEdgeType(row.edge_type),
         synced: true,
       }))

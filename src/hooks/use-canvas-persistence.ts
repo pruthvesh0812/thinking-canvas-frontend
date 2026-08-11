@@ -211,12 +211,18 @@ export function useCanvasPersistence() {
     // both_existing is always true today — Canvas.tsx's onConnect only fires
     // between two nodes already on the canvas; there is no "drag to empty
     // space creates a child node" gesture yet (STATE-MANAGEMENT.md).
+    // Handle ids (which side each end attaches to, e.g. "right-source") are
+    // stored uppercase per the contract; React Flow's actual handle ids are
+    // lowercase, so hydration lowercases them back. Null when the edge was
+    // drawn without a specific handle.
     const { error } = await supabase.from("edges").insert({
       id: edge.id,
       canvas_id: canvasId,
       session_id: sessionId,
       from_node_id: edge.source,
       to_node_id: edge.target,
+      from_handle: edge.sourceHandle?.toUpperCase() ?? null,
+      to_handle: edge.targetHandle?.toUpperCase() ?? null,
       edge_type: edge.edgeType,
       both_existing: true,
     })
