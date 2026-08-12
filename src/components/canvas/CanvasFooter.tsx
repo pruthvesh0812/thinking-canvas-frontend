@@ -2,14 +2,15 @@ import { useReactFlow } from "@xyflow/react"
 import { useCanvasStore } from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useGhostStore } from "@/stores/ghost-store"
+import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
 
-// Canvas switcher, "I'm done" (Session Complete — deferred to
-// session-lifecycle), new-node button. No floating toolbars over the
-// canvas itself (design brief).
+// Canvas switcher, "I'm done" (Session Complete), new-node button. No
+// floating toolbars over the canvas itself (design brief).
 export function CanvasFooter() {
   const canvasTitle = useSessionStore((s) => s.canvasTitle)
   const canvasPosition = useSessionStore((s) => s.canvasPosition)
   const addNode = useCanvasStore((s) => s.addNode)
+  const { beginSessionComplete } = useSessionLifecycle()
   const showRejected = useGhostStore((s) => s.showRejected)
   const toggleShowRejected = useGhostStore((s) => s.toggleShowRejected)
   const rejectedCount = useGhostStore((s) =>
@@ -59,9 +60,10 @@ export function CanvasFooter() {
       </button>
       <button
         type="button"
+        onClick={() => void beginSessionComplete()}
         className="rounded-full px-[15px] py-1.5 text-[12.5px]"
         style={{ color: "#6B6257", background: "none", border: "1px solid var(--tc-hairline-strong)" }}
-        title="Session Complete — coming soon"
+        title="Session Complete"
       >
         I&rsquo;m done
       </button>

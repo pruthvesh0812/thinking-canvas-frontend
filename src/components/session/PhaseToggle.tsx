@@ -1,16 +1,22 @@
 import { useSessionStore } from "@/stores/session-store"
+import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
 
 // Diverging (Expander territory) / converging (Stress-Tester territory) —
 // user flips it manually; user control always wins over the backend's own
-// sensed attunement (CORE-CONCEPTS.md).
+// sensed attunement (CORE-CONCEPTS.md). Writes sessions.current_phase to
+// Supabase directly on flip (SESSION-FLOWS.md).
 export function PhaseToggle() {
   const phase = useSessionStore((s) => s.phase)
   const setPhase = useSessionStore((s) => s.setPhase)
+  const { persistPhase } = useSessionLifecycle()
 
   const btn = (key: "diverging" | "converging") => (
     <button
       type="button"
-      onClick={() => setPhase(key)}
+      onClick={() => {
+        setPhase(key)
+        persistPhase(key)
+      }}
       className="rounded-full px-3 py-[3px] text-[11.5px]"
       style={{
         border: "none",

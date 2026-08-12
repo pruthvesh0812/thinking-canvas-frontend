@@ -36,6 +36,7 @@ import { OpenThreadsRail } from "./OpenThreadsRail"
 import { DebounceIndicator } from "./DebounceIndicator"
 import { HistoryBar } from "./HistoryBar"
 import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
+import { SessionCompleteModal } from "../session/SessionCompleteModal"
 
 // Registered once, module scope — React Flow re-renders everything if these
 // are recreated per render (CANVAS-RENDERING.md).
@@ -319,6 +320,7 @@ function CanvasInner() {
       </div>
 
       {!isHistory && <CanvasFooter />}
+      {!isHistory && <SessionCompleteModal />}
     </div>
   )
 }

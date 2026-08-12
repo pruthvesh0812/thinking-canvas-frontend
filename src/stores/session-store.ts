@@ -40,6 +40,13 @@ interface SessionStore {
    * brand-new canvas's session at 1; the canvas surface pairs this with
    * canvas-store.resetToEmpty() so a fresh canvas never shows seeded nodes. */
   startNewCanvas: (originalIntent: string) => void
+  /** Session Complete's "Start New Session" (session-lifecycle story) —
+   * swaps in the freshly opened session and bumps the display session
+   * number. Note: canvas-store.addNode still stamps new nodes with the
+   * hardcoded CURRENT_SESSION_NUMBER mock constant (auth story's flagged
+   * gap), so this only drives header/footer labels until that's wired
+   * through to the store. */
+  advanceSession: (sessionId: string) => void
 }
 
 // original_intent is write-once at canvas creation (session-lifecycle story) —
@@ -80,4 +87,12 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       viewedSession: null,
       insightsMode: "sidebar",
     }),
+  advanceSession: (sessionId) =>
+    set((s) => ({
+      sessionId,
+      sessionNumber: s.sessionNumber + 1,
+      phase: "diverging",
+      viewedSession: null,
+      insightsMode: "sidebar",
+    })),
 }))

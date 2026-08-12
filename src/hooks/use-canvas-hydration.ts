@@ -94,6 +94,13 @@ export function useCanvasHydration(canvasId: string) {
       }
 
       let sessionId = activeSessions?.[0]?.id
+      // Carry-Forward (SESSION-FLOWS.md): only loaded when this canvas is
+      // opening into a genuinely NEW session, not a resumed active one —
+      // "on starting a new session on the same canvas". No `resolved`
+      // column exists on session_learnings yet (Known Gap), so every
+      // learning ever written re-appears at the next new-session start;
+      // flagged here rather than invented around.
+      let carriedRows: { id: string; content: string; type: string }[] = []
       if (!sessionId) {
         try {
           const res = await sessionStart({ canvas_id: canvasId })
@@ -102,6 +109,16 @@ export function useCanvasHydration(canvasId: string) {
           logger.error("[hydration] session/start failed", { canvasId, error: err })
           if (!cancelled) setStatus("error")
           return
+        }
+
+        const { data: learningRows, error: learningsError } = await supabase
+          .from("session_learnings")
+          .select("id, content, type")
+          .eq("canvas_id", canvasId)
+        if (learningsError) {
+          logger.warn("[hydration] failed to load carried-forward learnings", { canvasId, error: learningsError })
+        } else {
+          carriedRows = learningRows ?? []
         }
       }
       if (cancelled) return
@@ -155,14 +172,31 @@ export function useCanvasHydration(canvasId: string) {
         synced: true,
       }))
 
-      useCanvasStore.getState().hydrate(nodes, edges)
+      // Carried-forward items land as local-only editable placeholders, badge-
+      // marked (HumanNode.tsx), in a dedicated row below the loaded grid — the
+      // existing content-persistence path picks each one up on first edit,
+      // same as any other new node (use-canvas-persistence.ts).
+      const carryY = GRID.y0 + Math.ceil((nodes.length || 1) / GRID.cols) * GRID.gapY + 160
+      const carried: CanvasNode[] = carriedRows.map((row, i) => ({
+        id: crypto.randomUUID(),
+        position: { x: GRID.x0 + i * GRID.gapX, y: carryY },
+        width: DEFAULT_WIDTH,
+        data: { content: row.content, owner: "human" as const, sessionNumber: 1, seedSource: "carried_forward" as const },
+      }))
+
+      useCanvasStore.getState().hydrate([...nodes, ...carried], edges)
       useSessionStore.getState().loadCanvas({
         canvasId,
         sessionId,
         originalIntent: canvas.original_intent,
         title: canvas.title,
       })
-      logger.info("[hydration] canvas loaded", { canvasId, nodes: nodes.length, edges: edges.length })
+      logger.info("[hydration] canvas loaded", {
+        canvasId,
+        nodes: nodes.length,
+        edges: edges.length,
+        carried: carried.length,
+      })
       setStatus("ready")
     }
 

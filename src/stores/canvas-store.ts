@@ -23,6 +23,11 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * content commit succeeds — never write an empty node to Supabase just
    * because it exists on the canvas (use-canvas-persistence.ts). */
   synced?: boolean
+  /** Session-lifecycle pre-loaded starting points (use-session-lifecycle.ts):
+   * a carried-forward unresolved thread, or an accepted Observer suggestion.
+   * Purely a badge/visual marker — once edited, the node persists through
+   * the ordinary human-node write path like any other. */
+  seedSource?: "carried_forward" | "observer_suggestion"
 }
 
 export interface CanvasNode {
@@ -102,6 +107,11 @@ interface CanvasStore {
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** Bulk-appends pre-loaded, edge-less starting points — carried-forward
+   * unresolved threads on a new session, or an accepted Observer suggestion
+   * (use-session-lifecycle.ts). Each arrives local-only (synced:false); the
+   * existing content-persistence path picks it up on first edit. */
+  addSeededNodes: (nodes: CanvasNode[]) => void
   /** Replaces the whole graph with rows loaded from Supabase
    * (use-canvas-hydration.ts). Everything passed here is already durable, so
    * callers mark it synced:true — never re-persist a hydrated row. */
@@ -196,6 +206,7 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  addSeededNodes: (nodes) => set((s) => ({ nodes: [...s.nodes, ...nodes] })),
   hydrate: (nodes, edges) => set({ nodes, edges, highlightedNodeId: null }),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),
 }))
