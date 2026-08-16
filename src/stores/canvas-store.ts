@@ -18,12 +18,22 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * the session (CORE-CONCEPTS.md) — this only drives historical
    * time-travel: viewing session N dims earlier nodes and hides later ones. */
   sessionNumber: number
+  /** True once this node has a real Supabase row. A freshly-added node
+   * (addNode) starts false and stays local-only until its first non-empty
+   * content commit succeeds — never write an empty node to Supabase just
+   * because it exists on the canvas (use-canvas-persistence.ts). */
+  synced?: boolean
 }
 
 export interface CanvasNode {
   id: string
   position: { x: number; y: number }
   width: number
+  /** Manual height (HumanNode's bottom-right corner resize). Undefined
+   * means "auto-fit content" — the default; once the user drags the
+   * corner it's set and the node stops shrinking below that value.
+   * Not persisted to Supabase — render-only, like width. */
+  height?: number
   data: CanvasNodeData
 }
 
@@ -32,6 +42,12 @@ export interface CanvasEdge {
   source: string
   target: string
   edgeType: HumanEdgeType
+  sourceHandle?: string
+  targetHandle?: string
+  /** True once this edge has a real Supabase row. An edge drawn to/from a
+   * node that isn't synced yet starts false and stays local-only until a
+   * retry succeeds (use-canvas-persistence.ts — retryPendingEdges). */
+  synced?: boolean
 }
 
 interface CanvasStore {
@@ -40,16 +56,56 @@ interface CanvasStore {
   highlightedNodeId: string | null
   updateNodePosition: (id: string, position: { x: number; y: number }) => void
   updateNodeContent: (id: string, content: string) => void
+  /** Manual horizontal resize (HumanNode's left/right resize handles and
+   * the bottom-right corner). Not persisted to Supabase — the nodes table
+   * has no width column, this is render-only. */
+  updateNodeWidth: (id: string, width: number) => void
+  /** Manual vertical resize (bottom-right corner). Undefined restores
+   * auto-fit. Not persisted to Supabase — render-only. */
+  updateNodeHeight: (id: string, height: number | undefined) => void
+  /** Combined width+height update from the corner handle — one store
+   * write per drag frame instead of two. */
+  updateNodeSize: (id: string, width: number, height: number) => void
+  /** Flips data.synced true after a node's first successful Supabase write
+   * (use-canvas-persistence.ts) — never set any other way. */
+  markNodeSynced: (id: string) => void
   setHighlightedNode: (id: string | null) => void
   /** click-empty-canvas / "+ New node" — empty node in edit mode
    * (CANVAS-RENDERING.md Canvas Interactions). */
   addNode: (position: { x: number; y: number }) => CanvasNode
   /** User-drawn edge via the pen rack — type is picked before the drag, so
-   * there is no post-hoc type popover (design's edge-creation model). */
-  addEdge: (source: string, target: string, edgeType: HumanEdgeType) => void
+   * there is no post-hoc type popover (design's edge-creation model).
+   * Returns the created edge (its client-generated id is what persistence
+   * writes to Supabase), or undefined if source/target were already
+   * connected (dedupe — nothing to persist). */
+  addEdge: (
+    source: string,
+    target: string,
+    edgeType: HumanEdgeType,
+    sourceHandle?: string,
+    targetHandle?: string,
+  ) => CanvasEdge | undefined
+  /** Rollback for a failed Supabase edge write (STATE-MANAGEMENT.md — the
+   * store is optimistic, Supabase is authoritative). */
+  removeEdge: (id: string) => void
+  /** Flips data.synced true after an edge's first successful Supabase write
+   * (use-canvas-persistence.ts) — never set any other way. */
+  markEdgeSynced: (id: string) => void
+  /** Deletes a node and cascades to any edge touching it (local only — the
+   * hook decides whether/how to mirror this to Supabase). Only human-owned
+   * nodes are ever passed here (CANVAS-RENDERING.md — "Delete: only
+   * human-owned elements"). */
+  removeNode: (id: string) => void
+  /** Rollback for a failed Supabase node delete — re-adds the node, and
+   * optionally the edges that were cascaded away with it. */
+  restoreNode: (node: CanvasNode, edges?: CanvasEdge[]) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** Replaces the whole graph with rows loaded from Supabase
+   * (use-canvas-hydration.ts). Everything passed here is already durable, so
+   * callers mark it synced:true — never re-persist a hydrated row. */
+  hydrate: (nodes: CanvasNode[], edges: CanvasEdge[]) => void
   /** North-star capture (2b) pairs this with session-store.startNewCanvas —
    * a freshly created canvas starts blank, never with the seeded demo graph. */
   resetToEmpty: () => void
@@ -87,6 +143,22 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, content } } : n)),
     })),
+  updateNodeWidth: (id, width) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, width } : n)),
+    })),
+  updateNodeHeight: (id, height) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, height } : n)),
+    })),
+  updateNodeSize: (id, width, height) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, width, height } : n)),
+    })),
+  markNodeSynced: (id) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
+    })),
   setHighlightedNode: (id) => set({ highlightedNodeId: id }),
   addNode: (position) => {
     const node: CanvasNode = {
@@ -98,13 +170,32 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node] }))
     return node
   },
-  addEdge: (source, target, edgeType) => {
-    if (get().edges.some((e) => e.source === source && e.target === target)) return
-    set((s) => ({
-      edges: [...s.edges, { id: crypto.randomUUID(), source, target, edgeType }],
-    }))
+  addEdge: (source, target, edgeType, sourceHandle, targetHandle) => {
+    if (get().edges.some((e) => e.source === source && e.target === target)) return undefined
+    const edge: CanvasEdge = {
+      id: crypto.randomUUID(),
+      source,
+      target,
+      edgeType,
+      ...(sourceHandle ? { sourceHandle } : {}),
+      ...(targetHandle ? { targetHandle } : {}),
+    }
+    set((s) => ({ edges: [...s.edges, edge] }))
+    return edge
   },
+  removeEdge: (id) => set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
+  markEdgeSynced: (id) =>
+    set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, synced: true } : e)) })),
+  removeNode: (id) =>
+    set((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== id),
+      edges: s.edges.filter((e) => e.source !== id && e.target !== id),
+      highlightedNodeId: s.highlightedNodeId === id ? null : s.highlightedNodeId,
+    })),
+  restoreNode: (node, edges = []) =>
+    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  hydrate: (nodes, edges) => set({ nodes, edges, highlightedNodeId: null }),
   resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),
 }))

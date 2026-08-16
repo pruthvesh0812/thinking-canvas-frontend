@@ -1,19 +1,332 @@
-import { useCanvasStore } from "@/stores/canvas-store"
+import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
+import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
+import { useSessionStore } from "@/stores/session-store"
+import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
-import type { GhostPairSlot } from "@/stores/ghost-store"
 
-// The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to talk to
-// yet — canvas-core/contract-layer haven't landed. Every write here is local
-// to canvas-store only. Each seam is commented with what the real call will
-// be so wiring it in later is a drop-in, not a rewrite.
+// Flip to "true" to fall back to the old local-only mock (no Supabase writes)
+// without deleting the real path below — useful if local Supabase is down.
+const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
+
+// Fallback dev ids for testing a single canvas without the create/hydrate
+// flow (a canvas + session row made by hand in Supabase). The real path now
+// reads the hydrated canvas/session from session-store; these only fill in
+// when nothing has been hydrated yet.
+const DEV_CANVAS_ID = process.env.NEXT_PUBLIC_DEV_CANVAS_ID
+const DEV_SESSION_ID = process.env.NEXT_PUBLIC_DEV_SESSION_ID
+
+// The canvas/session a write belongs to: whatever real canvas is currently
+// hydrated (session-store), falling back to the dev env vars. Returns null
+// only when neither is available — the caller then skips the Supabase write.
+function currentIds(): { canvasId: string; sessionId: string } | null {
+  const { canvasId, sessionId } = useSessionStore.getState()
+  const resolvedCanvas = canvasId ?? DEV_CANVAS_ID
+  const resolvedSession = sessionId ?? DEV_SESSION_ID
+  if (!resolvedCanvas || !resolvedSession) return null
+  return { canvasId: resolvedCanvas, sessionId: resolvedSession }
+}
+
+// React Flow handle ids are "<side>-source" / "<side>-target" (HumanNode.tsx
+// — one handle pair per side). The DB's from_handle/to_handle check
+// constraint only allows the bare side, uppercase ('TOP'|'RIGHT'|'BOTTOM'|
+// 'LEFT') — NOT the whole compound id uppercased, which is what caused
+// edges_from_handle_check to reject every insert. Strip the -source/-target
+// suffix before uppercasing.
+function handleSide(handle: string | null | undefined): string | null {
+  if (!handle) return null
+  return handle.split("-")[0].toUpperCase()
+}
+
+// The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to notify
+// yet — canvas-core/contract-layer haven't landed, so the Supabase write
+// below happens with NO POST /api/canvas-event call after it. That seam is
+// commented where it belongs so wiring it in later is a drop-in.
 export function useCanvasPersistence() {
   const updateNodeContent = useCanvasStore((s) => s.updateNodeContent)
 
   function persistNodeContent(nodeId: string, content: string) {
-    // TODO(contract-layer): Supabase `nodes` update, then
-    // POST /api/canvas-event('node.created') with IDs only — never content.
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    const previousContent = node?.data.content
+    const alreadySynced = node?.data.synced ?? false
+
+    // Optimistic — the store updates instantly regardless of write path.
     updateNodeContent(nodeId, content)
-    logger.debug("[persistence] node content updated (mock — no backend write)", { nodeId })
+
+    // A node with no Supabase row yet and no real text still isn't a
+    // "commit" — stays local-only (STATE-MANAGEMENT.md: persist on first
+    // NON-EMPTY blur, not per keystroke, not on an empty node). A node that
+    // already has a row can legitimately be cleared back to empty — that's
+    // an edit, not a never-committed node, so it still syncs.
+    if (!content.trim() && !alreadySynced) {
+      logger.debug("[persistence] empty node — staying local only, not yet committed", { nodeId })
+      return
+    }
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] node content updated (mock — no Supabase write)", { nodeId })
+      return
+    }
+
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase write", { nodeId })
+      return
+    }
+
+    // Fire-and-forget: never block the canvas render on the round-trip
+    // (same rule as api.ts's canvasEvent).
+    void writeNodeContent(nodeId, content, previousContent, ids.canvasId, ids.sessionId)
+  }
+
+  async function writeNodeContent(
+    nodeId: string,
+    content: string,
+    previousContent: string | undefined,
+    canvasId: string,
+    sessionId: string,
+  ) {
+    // upsert, not insert: this same path handles both the first content
+    // commit (creation) and every later edit (STATE-MANAGEMENT.md
+    // "Persistence Patterns" — creation and edits are the same shape here,
+    // and the id is always client-generated up front).
+    // Layout (x/y/width/height) rides along so a node's very first row
+    // already carries its position — the frontend owns these columns; the
+    // backend never reads them (layout contract update, 2026-08-11).
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    const { error } = await supabase.from("nodes").upsert({
+      id: nodeId,
+      canvas_id: canvasId,
+      session_id: sessionId,
+      owner: "human",
+      content,
+      x: node?.position.x ?? null,
+      y: node?.position.y ?? null,
+      width: node?.width ?? null,
+      height: node?.height ?? null,
+    })
+
+    if (error) {
+      logger.warn("[persistence] insert failed, rolling back", { nodeId, error })
+      if (previousContent !== undefined) updateNodeContent(nodeId, previousContent)
+      return
+    }
+
+    useCanvasStore.getState().markNodeSynced(nodeId)
+    logger.info("[persistence] node persisted to Supabase", { nodeId })
+    // TODO(contract-layer): POST /api/canvas-event('node.created') with IDs
+    // only, once notifying the backend is turned on.
+
+    retryPendingEdges(nodeId)
+  }
+
+  // Move / resize commit — persist x/y/width/height for a node that already
+  // has a Supabase row. Spatial-only: no content touched, no canvas-event
+  // (the backend is intentionally blind to layout — it never invalidates a
+  // fingerprint or wakes an agent). A node not yet synced is skipped: its
+  // layout gets written with the first content commit (writeNodeContent),
+  // so there's nothing to persist here until then.
+  function persistNodeLayout(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    if (!node || !node.data.synced) return
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] node layout changed (mock — no Supabase write)", { nodeId })
+      return
+    }
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping layout write", { nodeId })
+      return
+    }
+
+    void writeNodeLayout(nodeId, node.position.x, node.position.y, node.width, node.height ?? null)
+  }
+
+  async function writeNodeLayout(
+    nodeId: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number | null,
+  ) {
+    // update, not upsert — the row exists (synced check above), and an update
+    // touches only these four columns, never content/owner.
+    const { error } = await supabase.from("nodes").update({ x, y, width, height }).eq("id", nodeId)
+    if (error) {
+      // No rollback: snapping a node back to a stale position mid-work is
+      // more jarring than a lost layout write. Log and move on — the next
+      // move/resize commit will try again.
+      logger.warn("[persistence] node layout write failed", { nodeId, error })
+      return
+    }
+    logger.debug("[persistence] node layout persisted", { nodeId })
+  }
+
+  // Any edge touching this node that stayed local-only because this node
+  // (or possibly still the other end) wasn't synced yet. Runs after every
+  // successful node write, not just the "first" one, since either endpoint
+  // of a pending edge could be the one that was still uncommitted.
+  function retryPendingEdges(nodeId: string) {
+    const { edges } = useCanvasStore.getState()
+    const pending = edges.filter((e) => !e.synced && (e.source === nodeId || e.target === nodeId))
+    for (const edge of pending) attemptEdgeWrite(edge)
+  }
+
+  function persistEdge(
+    source: string,
+    target: string,
+    edgeType: HumanEdgeType,
+    sourceHandle?: string | null,
+    targetHandle?: string | null,
+  ) {
+    // Store generates the id here (not the hook) so the dedupe check and the
+    // id used for the Supabase write are the same call — no way for them to
+    // drift apart.
+    const edge = useCanvasStore
+      .getState()
+      .addEdge(source, target, edgeType, sourceHandle ?? undefined, targetHandle ?? undefined)
+    if (!edge) return // source/target already connected — nothing to persist
+    attemptEdgeWrite(edge)
+  }
+
+  // Shared by persistEdge (right after drawing) and retryPendingEdges (once
+  // a blocking node syncs later) — same guard chain either way.
+  function attemptEdgeWrite(edge: CanvasEdge) {
+    const nodes = useCanvasStore.getState().nodes
+    const sourceSynced = nodes.find((n) => n.id === edge.source)?.data.synced ?? false
+    const targetSynced = nodes.find((n) => n.id === edge.target)?.data.synced ?? false
+    if (!sourceSynced || !targetSynced) {
+      // Same rule as node content: stays local-only until both ends are
+      // real Supabase rows. Whichever node syncs later re-triggers this via
+      // retryPendingEdges — no failed round-trip in the meantime.
+      logger.debug("[persistence] edge touches an uncommitted node — staying local only", {
+        edgeId: edge.id,
+      })
+      return
+    }
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] edge created (mock — no Supabase write)", { edgeId: edge.id })
+      return
+    }
+
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase write", { edgeId: edge.id })
+      return
+    }
+
+    void writeEdge(edge, ids.canvasId, ids.sessionId)
+  }
+
+  async function writeEdge(edge: CanvasEdge, canvasId: string, sessionId: string) {
+    // both_existing is always true today — Canvas.tsx's onConnect only fires
+    // between two nodes already on the canvas; there is no "drag to empty
+    // space creates a child node" gesture yet (STATE-MANAGEMENT.md).
+    // from_handle/to_handle store just the bare side (TOP/RIGHT/BOTTOM/LEFT,
+    // uppercase — a DB check constraint), not the whole "right-source"
+    // compound id React Flow uses. See handleSide.
+    const { error } = await supabase.from("edges").insert({
+      id: edge.id,
+      canvas_id: canvasId,
+      session_id: sessionId,
+      from_node_id: edge.source,
+      to_node_id: edge.target,
+      from_handle: handleSide(edge.sourceHandle),
+      to_handle: handleSide(edge.targetHandle),
+      edge_type: edge.edgeType,
+      both_existing: true,
+    })
+
+    if (error) {
+      // A retried write failing here is a real error (not the FK case —
+      // attemptEdgeWrite already confirmed both ends are synced), so the
+      // same rollback applies even though the edge may have been sitting on
+      // the canvas for a while by the time a retry runs.
+      logger.warn("[persistence] edge insert failed, rolling back", { edgeId: edge.id, error })
+      useCanvasStore.getState().removeEdge(edge.id)
+      return
+    }
+
+    useCanvasStore.getState().markEdgeSynced(edge.id)
+    logger.info("[persistence] edge persisted to Supabase", { edgeId: edge.id })
+    // TODO(contract-layer): POST /api/canvas-event('edge.created') with IDs
+    // only, once notifying the backend is turned on.
+  }
+
+  function deleteNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    // Ghost ids never appear in canvas-store (no-op by lookup failing), and
+    // AI-owned nodes are excluded by design (CANVAS-RENDERING.md — delete is
+    // "only human-owned elements") — both land here as a no-op rather than
+    // needing a special case at the call site.
+    if (!node || node.data.owner !== "human") return
+
+    const connectedEdges = useCanvasStore.getState().edges.filter(
+      (e) => e.source === nodeId || e.target === nodeId,
+    )
+
+    // Optimistic — the store cascades the connected edges itself. Also drop
+    // any pending ghost pair keyed to this node: it would otherwise keep
+    // floating with a trigger that no longer exists. This is cleanup, not a
+    // reject decision, so it goes through dismiss, not requestReject.
+    useCanvasStore.getState().removeNode(nodeId)
+    useGhostStore.getState().dismiss(nodeId)
+
+    if (!node.data.synced) {
+      // Never had a Supabase row — and per the sync rule, neither did any
+      // edge that only ever touched it — so there's nothing to delete
+      // server-side.
+      logger.debug("[persistence] uncommitted node removed locally only", { nodeId })
+      return
+    }
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] node removed (mock — no Supabase write)", { nodeId })
+      return
+    }
+
+    // Deletes are by id (RLS-scoped), so writeNodeDelete doesn't need the
+    // ids — this only confirms we're in a real canvas context before hitting
+    // the network at all.
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", { nodeId })
+      return
+    }
+
+    void writeNodeDelete(node, connectedEdges)
+  }
+
+  async function writeNodeDelete(node: CanvasNode, connectedEdges: CanvasEdge[]) {
+    // Edges first: deleting the node while a synced edge still references it
+    // would fail the FK. Not transactional — see the comment below for what
+    // happens if the node delete fails after this step succeeds.
+    const syncedEdgeIds = connectedEdges.filter((e) => e.synced).map((e) => e.id)
+    if (syncedEdgeIds.length > 0) {
+      const { error: edgeError } = await supabase.from("edges").delete().in("id", syncedEdgeIds)
+      if (edgeError) {
+        logger.warn("[persistence] failed to delete connected edges, restoring node", {
+          nodeId: node.id,
+          error: edgeError,
+        })
+        useCanvasStore.getState().restoreNode(node, connectedEdges)
+        return
+      }
+    }
+
+    const { error } = await supabase.from("nodes").delete().eq("id", node.id)
+    if (error) {
+      // Connected edges may already be gone from Supabase by this point (the
+      // two deletes aren't wrapped in one transaction) — restoring them
+      // locally here would misrepresent server state, so only the node
+      // itself comes back.
+      logger.warn("[persistence] node delete failed, restoring node", { nodeId: node.id, error })
+      useCanvasStore.getState().restoreNode(node)
+      return
+    }
+
+    logger.info("[persistence] node deleted from Supabase", { nodeId: node.id })
+    // TODO(contract-layer): there is no node.deleted canvas-event yet
+    // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
   }
 
   function materializeGhost(triggerNodeId: string, slot: GhostPairSlot) {
@@ -25,5 +338,5 @@ export function useCanvasPersistence() {
     logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
   }
 
-  return { persistNodeContent, materializeGhost }
+  return { persistNodeContent, persistNodeLayout, persistEdge, deleteNode, materializeGhost }
 }

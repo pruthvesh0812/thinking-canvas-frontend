@@ -1,6 +1,10 @@
 // MIRRORED verbatim from thinking-canvas-api/src/db/database.types.ts
 // (Supabase-generated, from the actual DB schema — supabase gen types typescript)
 // source commit: 21d9ac454915d1d6e0eb8f210b1c998150b76d12   synced: 2026-08-05
+// nodes.{x,y,width,height} and edges.{from_handle,to_handle} (all nullable)
+// added 2026-08-11 per the layout-persistence contract update — re-copy from
+// the backend's regenerated file on the next full sync to pick up the
+// matching source commit.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md and re-copy.
 // Used only to type the Supabase client generic (src/lib/supabase.ts) so
 // .from(table).select()/.insert() are checked against real columns.
@@ -212,9 +216,11 @@ export type Database = {
           canvas_id: string
           created_at: string
           edge_type: string
+          from_handle: string | null
           from_node_id: string
           id: string
           session_id: string
+          to_handle: string | null
           to_node_id: string
         }
         Insert: {
@@ -222,9 +228,11 @@ export type Database = {
           canvas_id: string
           created_at?: string
           edge_type: string
+          from_handle?: string | null
           from_node_id: string
           id?: string
           session_id: string
+          to_handle?: string | null
           to_node_id: string
         }
         Update: {
@@ -232,9 +240,11 @@ export type Database = {
           canvas_id?: string
           created_at?: string
           edge_type?: string
+          from_handle?: string | null
           from_node_id?: string
           id?: string
           session_id?: string
+          to_handle?: string | null
           to_node_id?: string
         }
         Relationships: [
@@ -345,10 +355,14 @@ export type Database = {
           created_at: string
           direction_marker: string | null
           embedding: string | null
+          height: number | null
           id: string
           owner: string
           session_id: string
           summary: string | null
+          width: number | null
+          x: number | null
+          y: number | null
         }
         Insert: {
           canvas_id: string
@@ -356,10 +370,14 @@ export type Database = {
           created_at?: string
           direction_marker?: string | null
           embedding?: string | null
+          height?: number | null
           id?: string
           owner?: string
           session_id: string
           summary?: string | null
+          width?: number | null
+          x?: number | null
+          y?: number | null
         }
         Update: {
           canvas_id?: string
@@ -367,10 +385,14 @@ export type Database = {
           created_at?: string
           direction_marker?: string | null
           embedding?: string | null
+          height?: number | null
           id?: string
           owner?: string
           session_id?: string
           summary?: string | null
+          width?: number | null
+          x?: number | null
+          y?: number | null
         }
         Relationships: [
           {

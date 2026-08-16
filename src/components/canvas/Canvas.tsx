@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -19,6 +19,7 @@ import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
+import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
@@ -62,13 +63,19 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const addEdge = useCanvasStore((s) => s.addEdge)
+  const { persistEdge, deleteNode, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
   const { fitView } = useReactFlow()
+  // Nodes are a controlled prop (derived fresh from canvas-store every
+  // render) — React Flow's own internal selection bookkeeping never sticks
+  // unless we apply its "select" changes back in ourselves. Without this,
+  // no node was ever actually `selected`, so the delete key (which only
+  // acts on selected+deletable nodes) silently had nothing to delete.
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
@@ -107,11 +114,16 @@ function CanvasInner() {
         data: {
           ...n.data,
           width: n.width,
+          height: n.height,
           onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
         },
         draggable: !isHistory,
+        // Delete is a human-only affordance (CANVAS-RENDERING.md) — an
+        // accepted AI node keeps its permanent record, never deletable.
+        deletable: !isHistory && n.data.owner === "human",
+        selected: selectedNodeIds.has(n.id),
       }
     })
 
@@ -132,6 +144,8 @@ function CanvasInner() {
         // draggable, or a global onNode* handler is registered, which would
         // otherwise block hover/click on the ghost's own accept/reject UI.
         selectable: true,
+        // Ghosts are accept/reject only, never deletable (CANVAS-RENDERING.md).
+        deletable: false,
         style: { width: GHOST_LAYOUT.context.width },
       })
       if (pair.question) {
@@ -142,13 +156,14 @@ function CanvasInner() {
           data: { triggerNodeId },
           draggable: false,
           selectable: true,
+          deletable: false,
           style: { width: GHOST_LAYOUT.question.width },
         })
       }
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession])
+  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession, selectedNodeIds])
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
@@ -159,6 +174,8 @@ function CanvasInner() {
         id: e.id,
         source: e.source,
         target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
         type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
       }))
 
@@ -191,24 +208,48 @@ function CanvasInner() {
     (changes) => {
       if (isHistory) return
       for (const change of changes) {
-        if (change.type === "position" && change.position) {
-          updateNodePosition(change.id, change.position)
+        if (change.type === "position") {
+          // Every frame updates the store for a smooth drag; the commit
+          // (React Flow sends a final change with dragging=false) is the
+          // one we persist — one layout write per drag, not per frame.
+          if (change.position) updateNodePosition(change.id, change.position)
+          if (change.dragging === false) persistNodeLayout(change.id)
+        } else if (change.type === "remove") {
+          // Selection + Backspace (React Flow's default deleteKeyCode).
+          // deleteNode no-ops for ghost/AI-owned ids on its own, but the
+          // `deletable: false` set above keeps React Flow from ever
+          // emitting this change for them in the first place.
+          deleteNode(change.id)
+        } else if (change.type === "select") {
+          setSelectedNodeIds((prev) => {
+            const next = new Set(prev)
+            if (change.selected) next.add(change.id)
+            else next.delete(change.id)
+            return next
+          })
         }
       }
     },
-    [updateNodePosition, isHistory],
+    [updateNodePosition, persistNodeLayout, deleteNode, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(
     (connection) => {
       if (isHistory) return
+      if (!connection.source || !connection.target) return
       // Both endpoints already exist on the canvas — this pass has no
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
       // once that gesture exists.
-      addEdge(connection.source, connection.target, activePen)
+      persistEdge(
+        connection.source,
+        connection.target,
+        activePen,
+        connection.sourceHandle,
+        connection.targetHandle,
+      )
     },
-    [addEdge, activePen, isHistory],
+    [persistEdge, activePen, isHistory],
   )
 
   return (

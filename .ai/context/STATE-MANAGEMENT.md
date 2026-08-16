@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-07-05
-verified-against: backend canvasEventSchema (write-then-notify contract) + DB table list in backend ARCHITECTURE.md
+last-verified: 2026-08-16
+verified-against: backend canvasEventSchema (write-then-notify contract) + DB table list in backend ARCHITECTURE.md + nodes.{x,y,width,height} and edges.{from_handle,to_handle} layout-persistence contract update
 stale-after-days: 60
 ---
 
@@ -104,10 +104,48 @@ time, they are never recomputed server-side:
 - `edge_type` — from the EdgeTypeSelector
 - `both_existing` — true ⇔ drawn between two already-existing nodes
 
-### Position changes
+Plus two frontend-owned, backend-ignored columns for visual routing:
+`from_handle` / `to_handle` — which side of each node the edge attaches to.
 
-Node positions persist to Supabase (debounced, e.g. on drag end) but do **not**
-fire `canvas-event` — position is not a thinking event.
+**Why the id is compound, not just a side.** Each `HumanNode` renders TWO
+handles per side, stacked at the same position — a `type="target"` one and a
+`type="source"` one (HumanNode.tsx) — so a connection can be started from or
+dropped onto any edge of the card. `"right"` alone doesn't identify either
+one; `right-target` and `right-source` are two distinct DOM handles at the
+same spot, and React Flow needs the exact id to know which one an edge is
+anchored to.
+
+**Why the DB only stores the bare side.** `edge.sourceHandle` is *always* a
+`-source`-suffixed id and `edge.targetHandle` is *always* `-target`-suffixed —
+enforced by connection validity (strict mode won't let you start from a
+target handle or land on a source handle). So the suffix carries no
+information beyond "which column is this" — storing it would be redundant,
+and the DB's check constraint restricts the column to the bare side anyway
+(`TOP`/`RIGHT`/`BOTTOM`/`LEFT`, **uppercase**).
+
+**The round trip.** `handleSide()` in use-canvas-persistence.ts strips the
+`-source`/`-target` suffix before uppercasing on write. Hydration reattaches
+it deterministically — `from_handle` always becomes `<side>-source`,
+`to_handle` always becomes `<side>-target` — since which suffix to use is
+fully determined by which column it came from, never guessed. Skipping this
+(e.g. hydrating `sourceHandle: "right"` instead of `"right-source"`) makes
+React Flow look for a handle literally named `"right"`, find nothing, and
+silently fall back to a default side — the exact bug this feature exists to
+fix. Null lets that same default-side fallback happen on purpose (edge drawn
+without a specific handle, or a pre-migration row).
+
+Same frontend-owns / no-notify contract as node `x/y/width/height`.
+
+### Position / size changes
+
+Node layout persists to the `nodes` table's `x`/`y`/`width`/`height` columns
+(all nullable — the frontend owns them, the backend never reads them). Written
+on create (they ride along in `writeNodeContent`'s upsert) and on every
+move/resize **commit** — drag end / resize end, not per frame
+(`persistNodeLayout`). No `canvas-event` — layout is not a thinking event and
+the backend is intentionally blind to it. On re-entry `use-canvas-hydration.ts`
+restores the saved layout, falling back to a grid only for pre-migration rows
+whose columns are still null.
 
 ### Edits / deletes
 
