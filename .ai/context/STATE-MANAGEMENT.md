@@ -105,9 +105,13 @@ time, they are never recomputed server-side:
 - `both_existing` — true ⇔ drawn between two already-existing nodes
 
 Plus two frontend-owned, backend-ignored columns for visual routing:
-`from_handle` / `to_handle` — which side of each node the edge attaches to
-(React Flow handle ids like `right-source`). Stored **uppercase**, lowercased
-back on hydration; null lets React Flow pick a default side. Same
+`from_handle` / `to_handle` — which side of each node the edge attaches to.
+React Flow's own handle ids are compound (`right-source`, `top-target` — one
+source+target pair per side, HumanNode.tsx); the DB only stores the bare side,
+**uppercase** (`TOP`/`RIGHT`/`BOTTOM`/`LEFT` — a check constraint), never the
+whole compound id. `handleSide()` in use-canvas-persistence.ts strips the
+`-source`/`-target` suffix before uppercasing; hydration rebuilds the compound
+id on the way back in. Null lets React Flow pick a default side. Same
 frontend-owns / no-notify contract as node `x/y/width/height`.
 
 ### Position / size changes

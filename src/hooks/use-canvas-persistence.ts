@@ -26,6 +26,17 @@ function currentIds(): { canvasId: string; sessionId: string } | null {
   return { canvasId: resolvedCanvas, sessionId: resolvedSession }
 }
 
+// React Flow handle ids are "<side>-source" / "<side>-target" (HumanNode.tsx
+// — one handle pair per side). The DB's from_handle/to_handle check
+// constraint only allows the bare side, uppercase ('TOP'|'RIGHT'|'BOTTOM'|
+// 'LEFT') — NOT the whole compound id uppercased, which is what caused
+// edges_from_handle_check to reject every insert. Strip the -source/-target
+// suffix before uppercasing.
+function handleSide(handle: string | null | undefined): string | null {
+  if (!handle) return null
+  return handle.split("-")[0].toUpperCase()
+}
+
 // The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to notify
 // yet — canvas-core/contract-layer haven't landed, so the Supabase write
 // below happens with NO POST /api/canvas-event call after it. That seam is
@@ -211,18 +222,17 @@ export function useCanvasPersistence() {
     // both_existing is always true today — Canvas.tsx's onConnect only fires
     // between two nodes already on the canvas; there is no "drag to empty
     // space creates a child node" gesture yet (STATE-MANAGEMENT.md).
-    // Handle ids (which side each end attaches to, e.g. "right-source") are
-    // stored uppercase per the contract; React Flow's actual handle ids are
-    // lowercase, so hydration lowercases them back. Null when the edge was
-    // drawn without a specific handle.
+    // from_handle/to_handle store just the bare side (TOP/RIGHT/BOTTOM/LEFT,
+    // uppercase — a DB check constraint), not the whole "right-source"
+    // compound id React Flow uses. See handleSide.
     const { error } = await supabase.from("edges").insert({
       id: edge.id,
       canvas_id: canvasId,
       session_id: sessionId,
       from_node_id: edge.source,
       to_node_id: edge.target,
-      from_handle: edge.sourceHandle?.toUpperCase() ?? null,
-      to_handle: edge.targetHandle?.toUpperCase() ?? null,
+      from_handle: handleSide(edge.sourceHandle),
+      to_handle: handleSide(edge.targetHandle),
       edge_type: edge.edgeType,
       both_existing: true,
     })
