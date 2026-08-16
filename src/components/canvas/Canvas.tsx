@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  Background,
+  BackgroundVariant,
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -21,7 +24,9 @@ import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
+import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
 
+import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
 import { GhostQuestionNode, type GhostQuestionFlowNode } from "../ghost/GhostQuestionNode"
@@ -63,12 +68,20 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, deleteNode, persistNodeLayout } = useCanvasPersistence()
+  const { persistEdge, requestNodeDelete, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
+  const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
+  const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
+  const backdropColor = useCanvasUiStore((s) => s.backdropColor)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
+  // History keeps its own deliberate "cooler paper" treatment regardless of
+  // what's picked for the live canvas (CANVAS-RENDERING.md's past-vs-present
+  // contrast is a different concern than this cosmetic preference) — so the
+  // pane only gets an explicit background/pattern outside of history at all.
+  const showCustomBackdrop = !isHistory
   const { fitView } = useReactFlow()
   // Nodes are a controlled prop (derived fresh from canvas-store every
   // render) — React Flow's own internal selection bookkeeping never sticks
@@ -177,6 +190,12 @@ function CanvasInner() {
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
         type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
+        // Points at the target end — LogicalEdge/QuestionEdge already thread
+        // markerEnd through to BaseEdge, this is what actually turns it on.
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#6A6154", width: 16, height: 16 },
+        // Hover-to-delete is a live-canvas-only affordance, same rule as
+        // node delete (CANVAS-RENDERING.md).
+        data: { readOnly: isHistory },
       }))
 
     if (isHistory) return humanEdges
@@ -215,11 +234,14 @@ function CanvasInner() {
           if (change.position) updateNodePosition(change.id, change.position)
           if (change.dragging === false) persistNodeLayout(change.id)
         } else if (change.type === "remove") {
-          // Selection + Backspace (React Flow's default deleteKeyCode).
-          // deleteNode no-ops for ghost/AI-owned ids on its own, but the
-          // `deletable: false` set above keeps React Flow from ever
+          // React Flow's own deleteKeyCode is disabled below — the guarded
+          // confirm-then-undo flow lives in HumanNode instead. This branch
+          // is now only a defensive fallback for a programmatic
+          // deleteElements() call, none of which exist today.
+          // requestNodeDelete no-ops for ghost/AI-owned ids on its own, but
+          // the `deletable: false` set above keeps React Flow from ever
           // emitting this change for them in the first place.
-          deleteNode(change.id)
+          requestNodeDelete(change.id)
         } else if (change.type === "select") {
           setSelectedNodeIds((prev) => {
             const next = new Set(prev)
@@ -230,7 +252,7 @@ function CanvasInner() {
         }
       }
     },
-    [updateNodePosition, persistNodeLayout, deleteNode, isHistory],
+    [updateNodePosition, persistNodeLayout, requestNodeDelete, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(
@@ -293,7 +315,10 @@ function CanvasInner() {
         </div>
       )}
 
-      <div className="relative flex-1 overflow-hidden">
+      <div
+        className="relative flex-1 overflow-hidden"
+        style={showCustomBackdrop ? backdropPaneStyle(canvasBackdrop, backdropColor) : undefined}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -303,11 +328,20 @@ function CanvasInner() {
           onConnect={onConnect}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
+          // Delete is guarded now (HumanNode's confirm popover) — React
+          // Flow's own instant Backspace/Delete handling would bypass that,
+          // so it's off; HumanNode listens for the key itself while selected.
+          deleteKeyCode={null}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           minZoom={0.4}
           maxZoom={1.75}
           proOptions={{ hideAttribution: true }}
-        />
+        >
+          {showCustomBackdrop && canvasBackdrop === "grid" && (
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={gridDotColor(backdropColor)} />
+          )}
+        </ReactFlow>
+        {!isHistory && <BackdropSwitcher />}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
             <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
@@ -316,6 +350,31 @@ function CanvasInner() {
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
         <SessionInsightsPanel />
+
+        {/* Guarded-delete undo toast (Node Delete UI) — one slot; a second
+            delete while this is showing just replaces the label, it never
+            stacks. requestNodeDelete/undoNodeDelete own the actual timer. */}
+        {!isHistory && pendingDelete && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center"
+            style={{ zIndex: 30 }}
+          >
+            <div
+              className="pointer-events-auto flex items-center gap-3.5 rounded-full px-4 py-2.5 text-[13px] shadow-lg"
+              style={{ background: "var(--tc-ink)", color: "#f5f1e8" }}
+            >
+              <span>{pendingDelete.label} deleted</span>
+              <button
+                type="button"
+                onClick={pendingDelete.undo}
+                className="cursor-pointer border-none bg-transparent p-0 font-semibold underline decoration-1 underline-offset-2"
+                style={{ color: "inherit" }}
+              >
+                Undo
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!isHistory && <CanvasFooter />}

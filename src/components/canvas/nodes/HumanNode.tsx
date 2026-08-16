@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   Handle,
   NodeResizeControl,
@@ -55,9 +55,13 @@ const RESIZE_LINE_STYLE = { border: "none", background: "transparent" }
 export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
+  // "menu" = Duplicate/Delete list, "confirm" = the delete guard's Cancel/
+  // Delete step. Two distinct modes (not a boolean) because the confirm
+  // step must survive a hover-leave that would otherwise close "menu".
+  const [popover, setPopover] = useState<"closed" | "menu" | "confirm">("closed")
   const [draft, setDraft] = useState(data.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { persistNodeContent, persistNodeLayout } = useCanvasPersistence()
+  const { persistNodeContent, persistNodeLayout, requestNodeDelete, duplicateNode } = useCanvasPersistence()
   const updateNodeWidth = useCanvasStore((s) => s.updateNodeWidth)
   const updateNodeSize = useCanvasStore((s) => s.updateNodeSize)
 
@@ -82,6 +86,28 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
     el.style.height = `${el.scrollHeight}px`
   }, [editing, draft, data.content, data.width])
 
+  // Backspace/Delete while this node is the one selected opens the same
+  // confirm step the kebab menu's Delete goes through — React Flow's own
+  // instant delete-on-Backspace is turned off in Canvas.tsx specifically so
+  // this guard is the only path. Escape closes whatever's open regardless
+  // of selection (matches the kebab menu's own hover-close reach).
+  useEffect(() => {
+    if (readOnly || data.owner !== "human") return
+    if (!selected && popover === "closed") return
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (selected && (e.key === "Backspace" || e.key === "Delete")) {
+        e.preventDefault()
+        setPopover("confirm")
+      } else if (e.key === "Escape") {
+        setPopover("closed")
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [readOnly, data.owner, selected, popover])
+
   function commit() {
     setEditing(false)
     if (draft.trim() !== data.content) persistNodeContent(id, draft)
@@ -95,7 +121,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
 
   function onPointerDown(e: React.PointerEvent) {
     if (readOnly || editing) return
-    if ((e.target as HTMLElement).closest(".react-flow__handle, .react-flow__resize-control")) return
+    if ((e.target as HTMLElement).closest(".react-flow__handle, .react-flow__resize-control, .tc-node-menu")) return
 
     const origin = { x: e.clientX, y: e.clientY }
     let dragged = false
@@ -304,6 +330,149 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           className="pointer-events-none absolute"
           style={{ left: 15, top: 12, width: 2, height: 16, background: "rgba(43,38,34,.3)" }}
         />
+      )}
+      {/* Node actions (Node Delete UI) — delete/duplicate only ever target
+          human-owned elements (CANVAS-RENDERING.md), so this doesn't render
+          for AI-owned or read-only nodes. The kebab sits just outside the
+          card, matching the resize fold's fade-in-on-hover convention; the
+          popover opens on hovering that same outside area, not a click —
+          click is still wired as a fallback for touch. */}
+      {!readOnly && data.owner === "human" && (
+        <div
+          className="tc-node-menu nodrag absolute"
+          style={{
+            right: -30,
+            top: 6,
+            opacity: hovered || popover !== "closed" || selected ? 1 : 0,
+            transition: "opacity .15s ease",
+          }}
+          onMouseEnter={() => setPopover((p) => (p === "closed" ? "menu" : p))}
+          onMouseLeave={() => setPopover((p) => (p === "menu" ? "closed" : p))}
+        >
+          <button
+            type="button"
+            aria-label="Node actions"
+            aria-expanded={popover !== "closed"}
+            onClick={(e) => {
+              e.stopPropagation()
+              setPopover((p) => (p === "closed" ? "menu" : "closed"))
+            }}
+            className="flex items-center justify-center rounded-md"
+            style={{
+              width: 22,
+              height: 26,
+              border: "1px solid var(--tc-node-border)",
+              background: "var(--tc-node)",
+              boxShadow: "0 1px 2px rgba(43,38,34,.08)",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--tc-chrome)">
+              <circle cx="5" cy="1.5" r="1.1" />
+              <circle cx="5" cy="5" r="1.1" />
+              <circle cx="5" cy="8.5" r="1.1" />
+            </svg>
+          </button>
+
+          {popover !== "closed" && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute rounded-[10px]"
+              style={{
+                left: 0,
+                top: 26,
+                width: 208,
+                background: "var(--tc-node)",
+                border: "1px solid var(--tc-node-border)",
+                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
+                zIndex: 20,
+              }}
+            >
+              {/* Speech-bubble arrow pointing back up at the kebab — the
+                  anchoring cue the old floating card lacked. */}
+              <div
+                className="absolute"
+                style={{
+                  left: 8,
+                  top: -5,
+                  width: 9,
+                  height: 9,
+                  background: "var(--tc-node)",
+                  borderLeft: "1px solid var(--tc-node-border)",
+                  borderTop: "1px solid var(--tc-node-border)",
+                  transform: "rotate(45deg)",
+                }}
+              />
+
+              {popover === "menu" && (
+                <div className="relative p-[5px]">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPopover("closed")
+                      duplicateNode(id)
+                    }}
+                    className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-black/5"
+                    style={{ border: "none", background: "transparent", color: "var(--tc-ink)", cursor: "pointer" }}
+                  >
+                    <span>Duplicate</span>
+                    <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>⌘D</span>
+                  </button>
+                  <div style={{ height: 1, background: "var(--tc-hairline)", margin: "4px 6px" }} />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPopover("confirm")
+                    }}
+                    className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-[rgba(168,66,46,.08)]"
+                    style={{ border: "none", background: "transparent", color: "#a8422e", cursor: "pointer" }}
+                  >
+                    <span>Delete</span>
+                    <span className="text-[11px]" style={{ color: "#c99b8f" }}>⌫</span>
+                  </button>
+                </div>
+              )}
+
+              {popover === "confirm" && (
+                <div className="relative p-3.5">
+                  <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                    Delete this node?
+                  </div>
+                  <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                    You can undo for a few seconds after.
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                      style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                        requestNodeDelete(id)
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                      style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
       {data.aiMarker && (
         <span
