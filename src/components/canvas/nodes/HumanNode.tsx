@@ -121,6 +121,13 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
 
   function onPointerDown(e: React.PointerEvent) {
     if (readOnly || editing) return
+    // Modifier keys are selection gestures (Shift = additive toggle;
+    // Cmd/Ctrl = marquee, which the .tc-marquee-mode CSS in globals.css
+    // usually intercepts before this handler fires, but the state flip
+    // is async so a fast Cmd-click can still reach here) — never edit
+    // gestures. Bow out and let React Flow handle the selection instead
+    // of hijacking the click into beginEdit.
+    if (e.shiftKey || e.metaKey || e.ctrlKey) return
     if ((e.target as HTMLElement).closest(".react-flow__handle, .react-flow__resize-control, .tc-node-menu")) return
 
     const origin = { x: e.clientX, y: e.clientY }
