@@ -7,6 +7,7 @@ import {
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useReactFlow,
   type Edge,
   type EdgeTypes,
@@ -328,6 +329,25 @@ function CanvasInner() {
           onConnect={onConnect}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
+          // Group select (drag multiple nodes together): Shift-drag on empty
+          // canvas draws a marquee (themed in globals.css, .tc-scope's
+          // --xy-selection-* vars); plain drag still pans, so the constant
+          // gesture of navigating a big canvas is never hijacked into
+          // select mode. Cmd/Ctrl-click adds one node at a time to the
+          // selection regardless of platform default. Once 2+ nodes are
+          // selected, React Flow's own drag handling moves the whole group
+          // together when any one of them is dragged — onNodesChange above
+          // already applies a "position" change per node and commits each
+          // via persistNodeLayout on drag end, so a group move persists
+          // exactly like a single-node move, just once per node in it.
+          selectionOnDrag={false}
+          panOnDrag
+          selectionKeyCode="Shift"
+          multiSelectionKeyCode={["Meta", "Control"]}
+          // Partial, not full, containment — a marquee only needs to touch a
+          // node to catch it, which matters once nodes are wider than the
+          // box you can comfortably drag (large HumanNode cards).
+          selectionMode={SelectionMode.Partial}
           // Delete is guarded now (HumanNode's confirm popover) — React
           // Flow's own instant Backspace/Delete handling would bypass that,
           // so it's off; HumanNode listens for the key itself while selected.

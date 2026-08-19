@@ -90,6 +90,17 @@ body {
   color: var(--tc-ink);
 }
 
+/* Group-select marquee (Shift-drag on empty canvas — React Flow's own box
+   selection, themed via its CSS vars) — the library default is an
+   out-of-palette blue that would be the one un-designed thing on the whole
+   canvas. Ink-toned instead, matching HumanNode's own selected-state ring
+   (rgba(43,38,34,...) === --tc-ink) so a marquee-selected group and a single
+   selected node read as the same visual language. */
+.tc-scope {
+  --xy-selection-background-color: rgba(43, 38, 34, 0.05);
+  --xy-selection-border: 1px dashed rgba(43, 38, 34, 0.35);
+}
+
 @keyframes tc-qpulse {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }
