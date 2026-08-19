@@ -90,6 +90,32 @@ function CanvasInner() {
   // no node was ever actually `selected`, so the delete key (which only
   // acts on selected+deletable nodes) silently had nothing to delete.
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
+  // Cmd/Ctrl held → the whole canvas enters marquee mode: node drag turns
+  // off so a pointerdown that lands on a node falls through to the pane's
+  // own selection-box gesture instead of starting a node drag. window
+  // blur resets it because keyup never fires if the user Cmd-Tabs away
+  // mid-hold.
+  const [metaHeld, setMetaHeld] = useState(false)
+  useEffect(() => {
+    if (isHistory) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Meta" || e.key === "Control") setMetaHeld(true)
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === "Meta" || e.key === "Control") setMetaHeld(false)
+    }
+    function onBlur() {
+      setMetaHeld(false)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
+    window.addEventListener("blur", onBlur)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
+      window.removeEventListener("blur", onBlur)
+    }
+  }, [isHistory])
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
@@ -133,7 +159,12 @@ function CanvasInner() {
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
         },
-        draggable: !isHistory,
+        // Draggable is controlled at the ReactFlow level (nodesDraggable
+        // below) so Cmd/Ctrl held can disable it globally — that's how a
+        // marquee drag starting on top of a node falls through to the
+        // pane's selection instead of starting a node drag. Ghost nodes
+        // still opt out explicitly (draggable: false is a per-node
+        // override that always wins).
         // Delete is a human-only affordance (CANVAS-RENDERING.md) — an
         // accepted AI node keeps its permanent record, never deletable.
         deletable: !isHistory && n.data.owner === "human",
@@ -329,24 +360,30 @@ function CanvasInner() {
           onConnect={onConnect}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
-          // Group select (drag multiple nodes together): Shift-drag on empty
-          // canvas draws a marquee (themed in globals.css, .tc-scope's
-          // --xy-selection-* vars); plain drag still pans, so the constant
-          // gesture of navigating a big canvas is never hijacked into
-          // select mode. Cmd/Ctrl-click adds one node at a time to the
-          // selection regardless of platform default. Once 2+ nodes are
-          // selected, React Flow's own drag handling moves the whole group
-          // together when any one of them is dragged — onNodesChange above
-          // already applies a "position" change per node and commits each
-          // via persistNodeLayout on drag end, so a group move persists
-          // exactly like a single-node move, just once per node in it.
+          // Group select (drag multiple nodes together):
+          //   • plain drag on empty canvas — pans
+          //   • Cmd/Ctrl + drag anywhere (including on top of a node) —
+          //     draws a marquee; every node the box touches is selected
+          //     (SelectionMode.Partial, so you don't have to fully enclose
+          //     one — matters once nodes are wider than the box you can
+          //     comfortably drag). To make the "even on top of a node"
+          //     part work, nodesDraggable flips off while Meta/Ctrl is
+          //     held (metaHeld state above) so the pointerdown falls
+          //     through to the pane's selection gesture instead of
+          //     starting a node drag.
+          //   • Shift + click on a node — adds/removes just that node
+          //     from the current selection.
+          //   • plain drag on any one selected node — moves the whole
+          //     group together (React Flow's built-in multi-drag).
+          //     onNodesChange above already applies a "position" change
+          //     per node id and commits each via persistNodeLayout on
+          //     drag end, so a group move persists exactly like a
+          //     single-node move, one write per node in it.
+          nodesDraggable={!isHistory && !metaHeld}
           selectionOnDrag={false}
           panOnDrag
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode={["Meta", "Control"]}
-          // Partial, not full, containment — a marquee only needs to touch a
-          // node to catch it, which matters once nodes are wider than the
-          // box you can comfortably drag (large HumanNode cards).
+          selectionKeyCode={["Meta", "Control"]}
+          multiSelectionKeyCode="Shift"
           selectionMode={SelectionMode.Partial}
           // Delete is guarded now (HumanNode's confirm popover) — React
           // Flow's own instant Backspace/Delete handling would bypass that,
