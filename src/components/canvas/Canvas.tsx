@@ -69,7 +69,7 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, requestNodeDelete, persistNodeLayout } = useCanvasPersistence()
+  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
@@ -117,6 +117,31 @@ function CanvasInner() {
     }
   }, [isHistory])
 
+  // Group delete (2+ nodes selected): a single shared confirm, not one
+  // popover per selected node — HumanNode's own Backspace handling is
+  // gated to fire only when it's the SOLE selected node (data.soloSelected
+  // below), so this is the only path once 2+ are selected. Holds the
+  // snapshotted target ids, not just a boolean, so the confirm/delete
+  // acts on exactly the selection that was live when Backspace was
+  // pressed even if the live selection changes before Delete is clicked.
+  const [groupDeleteConfirm, setGroupDeleteConfirm] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (isHistory) return
+    if (selectedNodeIds.size < 2 && groupDeleteConfirm === null) return
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (selectedNodeIds.size >= 2 && (e.key === "Backspace" || e.key === "Delete")) {
+        e.preventDefault()
+        setGroupDeleteConfirm([...selectedNodeIds])
+      } else if (e.key === "Escape") {
+        setGroupDeleteConfirm(null)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [isHistory, selectedNodeIds, groupDeleteConfirm])
+
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
@@ -158,6 +183,7 @@ function CanvasInner() {
           onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
+          soloSelected: selectedNodeIds.size === 1 && selectedNodeIds.has(n.id),
         },
         // Draggable is controlled at the ReactFlow level (nodesDraggable
         // below) so Cmd/Ctrl held can disable it globally — that's how a
@@ -413,6 +439,60 @@ function CanvasInner() {
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
         <SessionInsightsPanel />
+
+        {/* Group delete confirm (2+ nodes selected, Backspace/Delete) — one
+            shared card instead of one per-node popover per selected node.
+            Sits above the undo toast (z-index) for the rare case a
+            previous single/group delete's undo toast is still showing
+            when this opens; the two are otherwise mutually exclusive in
+            time since confirming here immediately replaces this with
+            that same toast. */}
+        {!isHistory && groupDeleteConfirm && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
+            <div
+              className="pointer-events-auto rounded-[10px] p-3.5"
+              style={{
+                width: 280,
+                background: "var(--tc-node)",
+                border: "1px solid var(--tc-node-border)",
+                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
+              }}
+            >
+              <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                Delete {groupDeleteConfirm.length} nodes?
+              </div>
+              <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                You can undo for a few seconds after.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGroupDeleteConfirm(null)}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                  style={{
+                    border: "1px solid var(--tc-hairline-strong)",
+                    background: "transparent",
+                    color: "#6b6257",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestNodesDelete(groupDeleteConfirm)
+                    setGroupDeleteConfirm(null)
+                  }}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                  style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Guarded-delete undo toast (Node Delete UI) — one slot; a second
             delete while this is showing just replaces the label, it never

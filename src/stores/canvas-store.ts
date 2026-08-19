@@ -118,6 +118,11 @@ interface CanvasStore {
   /** Rollback for a failed Supabase node delete — re-adds the node, and
    * optionally the edges that were cascaded away with it. */
   restoreNode: (node: CanvasNode, edges?: CanvasEdge[]) => void
+  /** Batch form of restoreNode — undo/rollback for a multi-node delete
+   * (requestNodesDelete). Adds every node back plus the deduped edge list
+   * once; calling restoreNode per node instead would double-add an edge
+   * that touched two of the restored nodes. */
+  restoreNodes: (nodes: CanvasNode[], edges?: CanvasEdge[]) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
@@ -243,6 +248,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     })),
   restoreNode: (node, edges = []) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
+  restoreNodes: (nodes, edges = []) =>
+    set((s) => ({ nodes: [...s.nodes, ...nodes], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   hydrate: (nodes, edges) => set({ nodes, edges, highlightedNodeId: null }),

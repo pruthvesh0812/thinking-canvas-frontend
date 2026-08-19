@@ -5,11 +5,13 @@ import type { HumanEdgeType } from "@/stores/canvas-store"
  * ever used in history view regardless of what's picked here. */
 export type CanvasBackdrop = "paper" | "grid" | "blackboard"
 
-/** What the delete-undo toast is currently showing — a node OR an edge, the
- * toast doesn't care which. use-canvas-persistence owns the commit timer (a
- * side effect, not display state) and hands this store just enough to
- * render the toast and run Undo. `id` is only used to tell whether a later
- * delete has replaced this one; it's never read for display. */
+/** What the delete-undo toast is currently showing — a node, an edge, or a
+ * batch of several nodes (a group delete), the toast doesn't care which.
+ * use-canvas-persistence owns the commit timer (a side effect, not display
+ * state) and hands this store just enough to render the toast and run Undo.
+ * `id` is only used to tell whether a later delete has replaced this one —
+ * a node/edge id for a single delete, a synthetic "batch:<uuid>" for a
+ * group delete — it's never read for display. */
 export interface PendingDelete {
   id: string
   label: string

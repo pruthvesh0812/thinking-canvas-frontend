@@ -24,6 +24,12 @@ export type HumanNodeData = CanvasNodeData & {
   dimmed?: boolean
   /** Historical view: no editing, no handles, no ghost interaction. */
   readOnly?: boolean
+  /** True only when this node is the ONE selected node on the canvas
+   * (Canvas.tsx: selectedNodeIds.size === 1 && selectedNodeIds.has(id)).
+   * Gates this node's own inline Backspace-to-delete confirm — with 2+
+   * selected, Canvas.tsx's own listener owns the shared group-delete
+   * confirm instead. */
+  soloSelected?: boolean
 }
 export type HumanFlowNode = Node<HumanNodeData, "humanNode">
 
@@ -86,18 +92,23 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
     el.style.height = `${el.scrollHeight}px`
   }, [editing, draft, data.content, data.width])
 
-  // Backspace/Delete while this node is the one selected opens the same
-  // confirm step the kebab menu's Delete goes through — React Flow's own
-  // instant delete-on-Backspace is turned off in Canvas.tsx specifically so
-  // this guard is the only path. Escape closes whatever's open regardless
-  // of selection (matches the kebab menu's own hover-close reach).
+  // Backspace/Delete while this node is the SOLE selected node opens the
+  // same confirm step the kebab menu's Delete goes through — React Flow's
+  // own instant delete-on-Backspace is turned off in Canvas.tsx
+  // specifically so this guard is the only path. With 2+ nodes selected,
+  // data.soloSelected is false for all of them and Canvas.tsx's own
+  // listener handles Backspace/Delete instead (one shared group-delete
+  // confirm, not one popover per selected node — see Canvas.tsx). Escape
+  // still closes whatever's open here regardless of selection count
+  // (matches the kebab menu's own hover-close reach).
+  const soloSelected = !!data.soloSelected
   useEffect(() => {
     if (readOnly || data.owner !== "human") return
     if (!selected && popover === "closed") return
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
-      if (selected && (e.key === "Backspace" || e.key === "Delete")) {
+      if (soloSelected && (e.key === "Backspace" || e.key === "Delete")) {
         e.preventDefault()
         setPopover("confirm")
       } else if (e.key === "Escape") {
@@ -106,7 +117,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [readOnly, data.owner, selected, popover])
+  }, [readOnly, data.owner, selected, popover, soloSelected])
 
   function commit() {
     setEditing(false)
