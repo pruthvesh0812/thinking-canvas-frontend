@@ -308,7 +308,7 @@ function CanvasInner() {
 
   return (
     <div
-      className="tc-scope flex h-screen w-full flex-col"
+      className={`tc-scope flex h-screen w-full flex-col ${metaHeld && !isHistory ? "tc-marquee-mode" : ""}`}
       style={{
         // The past sits on a slightly cooler paper than the live canvas —
         // felt, not announced.
@@ -364,25 +364,31 @@ function CanvasInner() {
           //   • plain drag on empty canvas — pans
           //   • Cmd/Ctrl + drag anywhere (including on top of a node) —
           //     draws a marquee; every node the box touches is selected
-          //     (SelectionMode.Partial, so you don't have to fully enclose
-          //     one — matters once nodes are wider than the box you can
-          //     comfortably drag). To make the "even on top of a node"
-          //     part work, nodesDraggable flips off while Meta/Ctrl is
-          //     held (metaHeld state above) so the pointerdown falls
-          //     through to the pane's selection gesture instead of
-          //     starting a node drag.
+          //     (SelectionMode.Partial, so you don't have to fully
+          //     enclose one).
           //   • Shift + click on a node — adds/removes just that node
           //     from the current selection.
           //   • plain drag on any one selected node — moves the whole
           //     group together (React Flow's built-in multi-drag).
-          //     onNodesChange above already applies a "position" change
-          //     per node id and commits each via persistNodeLayout on
-          //     drag end, so a group move persists exactly like a
-          //     single-node move, one write per node in it.
+          //     onNodesChange already applies a "position" change per
+          //     node id and commits each via persistNodeLayout on drag
+          //     end, so a group move persists exactly like a single-node
+          //     move, one write per node in it.
+          //
+          // Implementation notes for "Cmd/Ctrl + drag":
+          //   RF's own selectionKeyCode override doesn't beat panOnDrag
+          //   for Meta/Control (works with Shift, not with modifier
+          //   keys), so metaHeld drives the swap ourselves: while held,
+          //   panOnDrag flips off and selectionOnDrag flips on. To make
+          //   "even over a node" work, nodes stop absorbing pointerdown
+          //   in marquee mode — nodesDraggable=false + a scoped
+          //   pointer-events:none rule (globals.css .tc-marquee-mode)
+          //   so the event lands on the pane; RF still selects nodes
+          //   from their positions in its store, not from DOM hits.
           nodesDraggable={!isHistory && !metaHeld}
-          selectionOnDrag={false}
-          panOnDrag
-          selectionKeyCode={["Meta", "Control"]}
+          panOnDrag={!isHistory && !metaHeld}
+          selectionOnDrag={!isHistory && metaHeld}
+          selectionKeyCode={null}
           multiSelectionKeyCode="Shift"
           selectionMode={SelectionMode.Partial}
           // Delete is guarded now (HumanNode's confirm popover) — React
