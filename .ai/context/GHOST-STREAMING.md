@@ -1,24 +1,30 @@
 ---
-last-verified: 2026-07-05
-verified-against: backend src/streaming/tokens.ts + src/streaming/spawn.ts + src/routes/stream.ts + src/agents/*.ts prompt constants + all three streaming pipelines (read line-by-line — NOT the backend design docs, which describe an unimplemented server-side split)
+last-verified: 2026-08-05
+verified-against: thinking-canvas-api commit 21d9ac4 — src/streaming/tokens.ts, src/streaming/spawn.ts, src/routes/stream.ts, src/agents/*.ts prompts, and its own .ai/context/FRONTEND-CONTRACT.md §6/§7 (frontend-contract-holes fix, 2026-07-19)
 stale-after-days: 30
 ---
 
 # GHOST-STREAMING.md
 
 > **Load this when:** Working on the SSE hook, ghost node rendering, the ghost
-> store, accept/reject flow, or anything touching `spawn`/`chunk`/`done` handling.
+> store, accept/reject flow, or anything touching `spawn`/`chunk`/`node_type`/`done` handling.
+
+> **2026-08-05 sync note:** this file previously documented a raw, unsplit
+> stream that the frontend had to parse markers out of, plus a
+> reconnect-per-ghost lifecycle and no attribution on `done`. All three are
+> now fixed backend-side (the "frontend-contract-holes" story). This revision
+> reflects the current backend, not the old workaround.
 
 ---
 
 ## The Protocol (frontend side)
 
-One `EventSource` per active session. Every ghost pair arrives as this sequence:
+One `EventSource`, opened once per active session and held open for the
+**whole session** — not per ghost. Every ghost pair arrives as this sequence
+on that one connection:
 
 ```
-spawn ──1.5s──▶ chunk* ──▶ done
-                  └─ EVERY chunk targets context_node.ghost_id (see below).
-                     There is NO separate stream for the question node.
+spawn ──1.5s──▶ chunk*/node_type ──▶ done
 ```
 
 The 1.5s gap is a deliberate backend sleep (`step.sleep('ghost-animation','1500ms')`)
@@ -28,21 +34,18 @@ before text starts arriving. Use it.
 ```typescript
 type RedisMessage =
   | { type: 'spawn'; descriptor: SpawnDescriptor }
-  | { type: 'chunk'; target: string; data: string }   // target = ALWAYS the context ghost_id
-  | { type: 'done' }
-  | { type: 'ping' }                                   // keepalive — ignore
+  | { type: 'chunk'; target: string; data: string }               // target = the ghost_id this text belongs to
+  | { type: 'node_type'; target: string; node_type: ContextNodeType } // restyle the context ghost named by target
+  | { type: 'done'; thread_id: string; turn_index: number; trigger_node_id: string;
+      context_ghost_id: string; question_ghost_id: string | null }
+  | { type: 'ping' }                                               // keepalive — ignore
 ```
 
-> ⚠️ **The single most important thing on this page.** The backend streams the
-> agent's **raw output** — one stream, all chunks tagged with
-> `context_node.ghost_id` — and that raw text contains inline control markers
-> (`[NODE_TYPE: …]`, `[QUESTION]`, `[ARTICULATION n]`). The question node is
-> **never** streamed to separately, and the markers are **never** stripped
-> server-side. The frontend parses the markers and routes the text itself. This
-> is verified against `src/streaming/tokens.ts` (`streamAgentOutput` publishes
-> every token to a single ghost id) — the backend's own design comments describe
-> a server-side split that **was never implemented**. See "Content Delivery"
-> below and API-CONTRACT Known Gap #6.
+> The backend splits markers **server-side** now (`src/streaming/tokens.ts`).
+> `chunk.target` is whichever ghost (context or question) that text actually
+> belongs to — append verbatim, no parsing. A `node_type` message is how
+> `[NODE_TYPE: x]` reaches you: it overrides the spawn descriptor's default
+> and tells you to restyle the context ghost. See "Content Delivery" below.
 
 ---
 
@@ -56,12 +59,12 @@ type SpawnDescriptor = {
   trigger_node_id: string          // the real node the pair anchors to
   session_id: string
   context_node: {
-    ghost_id: string               // pre-assigned UUID — chunk messages target this
-    node_type: ContextNodeType     // reframe | mirror | pattern | reference | contradiction | appreciation
+    ghost_id: string               // pre-assigned UUID — chunk/node_type messages target this
+    node_type: ContextNodeType     // pre-assigned DEFAULT — a node_type message may override it
     agent_role: AgentRole          // shown as the small role icon
   }
   context_edge: { edge_type: EdgeType; from: string; to: string }
-  question_node?: { ghost_id: string; node_type: 'question' }   // absent for some appreciations
+  question_node?: { ghost_id: string; node_type: 'question' }   // absent for the Articulator; present-but-may-receive-no-chunks for an appreciation
   question_edge?: { edge_type: EdgeType; from: string; to: string }
 }
 ```
@@ -72,65 +75,60 @@ On `spawn` the frontend:
 2. Create ghost React Flow nodes (empty content) + dotted ghost edges,
    positioned floating near the trigger node — above the canvas layer,
    non-blocking.
-3. If `context_node.node_type === 'appreciation'` and there is no question
-   node → render at full opacity with no reject button (the sole exception).
-4. Start the ghost-frame entrance animation (~the 1.5s window).
+3. Start the ghost-frame entrance animation (~the 1.5s window).
 
-On `chunk`: `target` is **always** `context_node.ghost_id`. Append `data` to the
-pair's accumulating raw buffer, then re-derive the split (context text, question
-text, node type) from that buffer — see "Content Delivery" next. Do **not** look
-up a node by `target` and render `data` verbatim: that paints raw markers and
-leaves the question node forever empty.
+On `chunk`: append `data` to the ghost node whose id **is** `target` — no
+lookup-by-role, no buffering, no parsing. If `target` doesn't match any
+spawned ghost id, that's a protocol error: log it, drop it.
 
-On `done`: mark the pair streamed — enable the accept/reject controls.
-(Controls before `done` would let the user judge a half-streamed thought.)
+On `node_type`: set the context ghost's rendered type to `node_type` (this
+**overrides** the descriptor default) and restyle its badge/icon accordingly.
+
+On `done`: mark **the pair named by `context_ghost_id`/`question_ghost_id`**
+as streamed — enable accept/reject on exactly that pair. Multiple generations
+can be in flight on the one connection (a debounced Expander run and an
+immediate Articulator run can interleave); `done` is now attributed, so
+finalize only the pair it names, never "whichever pair is pending."
 
 ---
 
-## Content Delivery — One Raw Stream, You Parse the Markers
+## Content Delivery — Pre-Routed, You Just Append
 
-The `node_type` in the SpawnDescriptor is only a **pre-assigned default** (the
-backend mints it before the agent runs). The real node type and the context /
-question split live in the streamed text as markers. Grammar, verified from the
-agent prompt constants in `src/agents/*.ts`:
+There is no marker grammar left for the frontend to parse. The backend's
+token layer already did it:
 
-```
-[NODE_TYPE: reframe|mirror|pattern|reference|contradiction|appreciation]
-<context paragraph>
-[QUESTION]
-<question sentence>
-```
+- Text before `[QUESTION]` in the agent's raw output arrives as `chunk`
+  messages targeting the **context** ghost id.
+- Text after `[QUESTION]` arrives as `chunk` messages targeting the
+  **question** ghost id.
+- `[NODE_TYPE: x]` never arrives as ghost text at all — it arrives as a
+  `node_type` message instead.
+- **Exception — the Articulator.** It has no question node; its body streams
+  `[ARTICULATION 1] … [ARTICULATION 2] … [ARTICULATION 3]` (2–3, the third
+  optional) as ordinary **context**-ghost chunks — this is sub-structure of
+  one node, not a pair split. This is the one marker the frontend still reads
+  itself: parse `[ARTICULATION n]` out of the context ghost's accumulated text
+  and render 2–3 selectable readings inside that single node.
 
-- **Expander / Stress-Tester / Outer Subconscious** emit the above.
-  `[QUESTION]` is present except for a rare Expander `appreciation` (no question).
-- **Articulator** emits **no `[QUESTION]`**; instead its body is 2–3 options:
-  ```
-  [NODE_TYPE: …]
-  [ARTICULATION 1]
-  <one reading>
-  [ARTICULATION 2]
-  <another reading>
-  [ARTICULATION 3]   (optional)
-  <a third>
-  ```
-  Render these as selectable options inside the single context node — there is
-  no question node for the Articulator.
+Per-agent cheat sheet (what to expect on `spawn.context_node.agent_role`):
 
-**Parsing rules (do this in the ghost store's `appendChunk`, not in components):**
-1. **Buffer, then parse.** Markers can be split across chunk boundaries
-   (`"[QUEST"` + `"ION]"`). Accumulate the raw stream per pair and re-parse the
-   whole buffer on each chunk — never regex a single `data` payload.
-2. `[NODE_TYPE: x]` → set the context node's rendered type to `x` (this
-   **overrides** the descriptor default). Strip the marker line from display.
-3. Text after the `[NODE_TYPE]` line and before `[QUESTION]` → **context** node.
-4. Text after `[QUESTION]` → **question** node (render it into
-   `question_node.ghost_id`'s frame — which you created from the descriptor at
-   `spawn`, not from any chunk `target`).
-5. Never show a partial marker (e.g. a trailing `"["`) as ghost text — hold
-   incomplete bracket sequences in the buffer until they resolve.
+| agent_role | Question node | Body format |
+|---|---|---|
+| `expander` | usually (omitted only for an `appreciation`) | paragraph, then `[QUESTION]` |
+| `stress_tester` | usually (same rule) | paragraph, then `[QUESTION]` |
+| `outer_subconscious` | always | paragraph, then `[QUESTION]` |
+| `articulator` | never | `[ARTICULATION 1..3]` inside the context ghost |
+| `observer` | never streams a ghost pair — session-complete only | — |
 
-The persisted, accept-time content is this parsed text with markers stripped
-(context text → the `owner:'ai'` context node; question text → the question node).
+**Empty question ghost:** Expander/Stress-Tester spawns always pre-create a
+question ghost in the descriptor, but an `appreciation` response omits
+`[QUESTION]` — so that ghost simply never receives a `chunk`. If it has
+received none by `done`, remove it and its edge silently (the sole exception
+CANVAS-RENDERING.md already documents: appreciation renders at full opacity,
+no reject button).
+
+The persisted, accept-time content is exactly what accumulated per ghost id —
+there are no markers left in it to strip.
 
 ---
 
@@ -138,8 +136,8 @@ The persisted, accept-time content is this parsed text with markers stripped
 
 ```typescript
 // src/hooks/use-ghost-stream.ts
-// Owns the EventSource lifecycle for the active session and dispatches every
-// message into the ghost store. Components never touch the EventSource.
+// Owns the ONE EventSource for the active session — opened at session start,
+// held open for the session's lifetime. Components never touch it directly.
 export function useGhostStream(sessionId: string | null) {
   useEffect(() => {
     if (!sessionId) return
@@ -148,19 +146,28 @@ export function useGhostStream(sessionId: string | null) {
     source.onmessage = (e) => {
       const msg = JSON.parse(e.data) as RedisMessage
       switch (msg.type) {
-        case 'spawn': useGhostStore.getState().spawn(msg.descriptor); break
-        // target is always the context ghost id; the store buffers + parses (markers → context/question split)
-        case 'chunk': useGhostStore.getState().appendChunk(msg.target, msg.data); break
-        case 'done':  useGhostStore.getState().markDone(); break
-        case 'ping':  break
+        case 'spawn':     useGhostStore.getState().spawn(msg.descriptor); break
+        case 'chunk':     useGhostStore.getState().appendChunk(msg.target, msg.data); break
+        case 'node_type': useGhostStore.getState().setNodeType(msg.target, msg.node_type); break
+        case 'done':      useGhostStore.getState().markDone(msg); break
+        case 'ping':      break
         default:
-          // Forward-compat: the protocol will grow (waiting/offer/withdraw).
-          // Unknown types are logged and ignored — never thrown on.
-          logger.warn('[ghost-stream] unknown message type', { msg })
+          // Forward-compat: 'waiting'/'offer'/'withdraw' are typed but never
+          // emitted today (intervention.ts isn't mounted) — and the protocol
+          // may grow further. Unknown types are logged and ignored — never
+          // thrown on.
+          logger.warn('[ghost-stream] unhandled message type', { msg })
       }
     }
 
-    source.onerror = () => { /* EventSource auto-reconnects; log only */ }
+    source.onerror = () => {
+      // A genuine network drop is the ONLY reason this fires — the backend
+      // holds the connection open for the whole session and does not close
+      // it per-ghost. Treat this as an error path: log it, and reconcile
+      // ground truth from Supabase on the next mount rather than assuming
+      // any specific pair was lost.
+      logger.error('[ghost-stream] connection error')
+    }
     return () => source.close()
   }, [sessionId])
 }
@@ -168,20 +175,13 @@ export function useGhostStream(sessionId: string | null) {
 
 **Lifecycle rules:**
 - Open on canvas mount (once the active session id is known), close on unmount.
-- `EventSource` reconnects automatically on drop — don't hand-roll retry loops.
-  A pair that was mid-stream during a drop is lost; the ghost store should
-  discard any pair still un-`done` after a reconnect rather than show a stub.
-- **The backend closes the connection after every `done`** (verified in
-  `src/routes/stream.ts` — the handler resolves on the first `done`). So a
-  reconnect is routine, not an error, and it happens after *every* ghost — treat
-  `onerror`/reconnect as normal flow. Upstash pub/sub has **no replay**, so any
-  `spawn` published during the reconnect window is lost; and two generations that
-  overlap on one session (a debounced Expander + an immediate Articulator) will
-  see the first `done` cut the second short. This is a backend wart
-  (API-CONTRACT Known Gap #6b) — until it's fixed, don't assume every triggered
-  agent produces a visible ghost.
+- **One connection for the whole session — do not reconnect per ghost.** The
+  backend's route resolves only on client abort or a server write error
+  (`src/routes/stream.ts`), never on `done`. If `onerror` fires, that's a real
+  network problem, not routine flow.
 - The backend sends `ping` every 25s; silence much longer than that means the
   connection is dead even if the browser hasn't noticed.
+- Never open a second `EventSource` for the same session.
 
 ---
 
@@ -194,25 +194,28 @@ User clicks accept/reject on each pair node
   │
   ├── ACCEPT side effects (frontend owns materialization):
   │     1. Write accepted ghost(s) to Supabase as real nodes:
-  │        { owner: 'ai', content: streamedText, canvas_id, session_id }
-  │        + the connecting edge rows
-  │     2. Do NOT fire POST /api/canvas-event for them — the agent pipeline
-  │        must not react to its own output (see API-CONTRACT Known Gap #5)
-  │     3. Animate ghost → real (opacity 100%, solid border, solid edge)
+  │        { owner: 'ai', content: <accumulated ghost text>, canvas_id, session_id },
+  │        reusing the ghost UUID as the node id
+  │        + the connecting edge rows (both_existing: false)
+  │     2. POST /api/ghost-status with both node statuses
+  │     3. POST /api/canvas-event { event_type: 'ghost.accepted', node_ids, agent_role }
+  │        — enriches the AI node(s) (summary/embedding/node_sequence + an
+  │        ai_contributions audit row). Idempotent; never re-triggers an agent.
+  │     4. Animate ghost → real (opacity 100%, solid border, solid edge)
   │
   ├── REJECT side effects:
   │     1. RejectionReasonSelector — too_abstract | too_technical | skip_for_now
-  │     2. Remove the ghost elements
+  │     2. POST /api/ghost-status with the reason (omit ⇒ backend defaults to skip_for_now)
+  │     3. Remove the ghost elements — nothing is written to nodes/edges
   │
-  └── Either way, ONE call: POST /api/ghost-status with both node statuses
-        ⚠ requires thread_id + turn_index — not yet delivered over SSE
-          (API-CONTRACT Known Gap #1). Blocked until the backend enriches
-          the done/spawn message; build the store to hold this metadata.
+  └── Either way, ghost-status needs thread_id + turn_index — read them
+        straight off the `done` message for this pair; no agent_threads read,
+        no extra request.
 ```
 
-Rejection is not failure — it is signal. The backend converts the reason into
-negative constraints for future prompts, so the reason selector is mandatory
-UI, not decoration.
+Rejection is not failure — it is signal. A rejected **context** node (not the
+question alone) converts the reason into negative constraints for future
+prompts via the Rejection Insights Engine.
 
 ---
 
@@ -224,22 +227,20 @@ UI, not decoration.
 // of the data structure instead of being checked imperatively.
 type GhostPairState = {
   descriptor: SpawnDescriptor
-  raw: string                              // accumulated stream (markers included)
-  nodeType: ContextNodeType                // starts = descriptor default, overridden by [NODE_TYPE:]
-  contextText: string                      // parsed from raw — markers stripped
-  questionText: string                     // parsed from raw (text after [QUESTION])
-  articulations?: string[]                 // Articulator only — parsed [ARTICULATION n] sections
-  streamed: boolean                        // set by done — gates the controls
-  meta?: { thread_id: string; turn_index: number }  // pending Known Gap #1
+  nodeType: ContextNodeType                // starts = descriptor default, overridden by a `node_type` message
+  contextText: string                      // accumulated chunk.data for context_node.ghost_id
+  questionText: string                     // accumulated chunk.data for question_node.ghost_id (if any)
+  articulations?: string[]                 // Articulator only — parsed [ARTICULATION n] out of contextText
+  streamed: boolean                        // set by `done` — gates the controls
+  attribution?: { thread_id: string; turn_index: number }  // set by `done` — what ghost-status needs
 }
 
 type GhostStore = {
   pairs: Record<string, GhostPairState>    // key = trigger_node_id
   spawn(d: SpawnDescriptor): void          // replaces existing pair for the node
-  // target is always the context ghost id; appendChunk pushes onto `raw` then
-  // re-parses raw → { nodeType, contextText, questionText, articulations }.
-  appendChunk(ghostId: string, data: string): void
-  markDone(): void
+  appendChunk(ghostId: string, data: string): void       // routes to context or question by matching the id, no parsing
+  setNodeType(ghostId: string, nodeType: ContextNodeType): void
+  markDone(msg: Extract<RedisMessage, { type: 'done' }>): void  // sets streamed + attribution on the matching pair
   resolve(triggerNodeId: string): void     // remove after accept/reject completes
 }
 ```
@@ -253,12 +254,12 @@ type GhostStore = {
 // ❌ Never render ghost layout from anything but the SpawnDescriptor
 // ❌ Never let chunks create nodes — a chunk whose target has no spawned
 //    frame is a protocol error: log it, drop it
-// ❌ Never render chunk `data` verbatim — it carries [NODE_TYPE:]/[QUESTION]/
-//    [ARTICULATION] markers; parse them out (Content Delivery) or the user sees
-//    raw markup and the question node stays empty
-// ❌ Never wait for chunks targeting the question ghost id — they never come;
-//    the question text is parsed out of the context stream
+// ❌ Never re-parse [NODE_TYPE:]/[QUESTION] out of chunk.data — the backend
+//    already split it; a `node_type` message and pre-routed chunks are all
+//    you get, and all you need
+// ❌ Never reconnect the EventSource per ghost, or open a second one per session
+// ❌ Never finalize "whichever pair is pending" on a bare `done` — it names
+//    the pair via context_ghost_id/question_ghost_id; use that
 // ❌ Never auto-accept, auto-reject, or fade a ghost on a timer
-// ❌ Never open more than one EventSource per session
 // ❌ Never throw on an unknown SSE message type
 ```

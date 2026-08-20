@@ -3,6 +3,42 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* ThinkingCanvas design tokens — see .ai/context/CANVAS-RENDERING.md.
+     "The interface defers; the human's thinking is the only thing that
+     gets to be vivid." Amber is reserved for exactly one meaning: the AI
+     intervention. Never reused for decoration. */
+  --tc-surface: #f7f3ec;
+  --tc-surface-quiet: #f4f1e9;
+  --tc-node: #fffefa;
+  --tc-node-border: #cfc6b6;
+  --tc-ink: #2b2622;
+  --tc-chrome: #8a8072;
+  --tc-chrome-quiet: #a89e8e;
+  --tc-chrome-faint: #b3a891;
+  --tc-hairline: #e6dfd0;
+  --tc-hairline-strong: #e0d8c7;
+  --tc-panel: #fbf8f1;
+  --tc-panel-border: #e3dbcb;
+  --tc-amber: #c9903a;
+  --tc-amber-ink: #8a6a28;
+  --tc-amber-ink-strong: #6b4f1b;
+
+  /* Backdrop switcher (CanvasFooter's sibling control) — the chalkboard
+     option only ever paints the ReactFlow pane itself, never node cards or
+     chrome, so these two tokens are all it needs. */
+  --tc-blackboard: #1f2b23;
+  --tc-blackboard-grid: rgba(255, 255, 255, 0.06);
+
+  --tc-ghost-opacity: 0.47;
+
+  --tc-radius-sm: 7px;
+  --tc-radius-md: 10px;
+  --tc-radius-pill: 999px;
+
+  --tc-motion-settle: 380ms;
+  --tc-motion-pulse: 3.6s;
+  --tc-motion-shimmer: 1.2s;
 }
 
 @theme inline {
@@ -10,6 +46,25 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --font-tc-content: var(--font-source-sans), system-ui, sans-serif;
+  --font-tc-hand: var(--font-caveat), cursive;
+
+  --color-tc-surface: var(--tc-surface);
+  --color-tc-surface-quiet: var(--tc-surface-quiet);
+  --color-tc-node: var(--tc-node);
+  --color-tc-node-border: var(--tc-node-border);
+  --color-tc-ink: var(--tc-ink);
+  --color-tc-chrome: var(--tc-chrome);
+  --color-tc-chrome-quiet: var(--tc-chrome-quiet);
+  --color-tc-chrome-faint: var(--tc-chrome-faint);
+  --color-tc-hairline: var(--tc-hairline);
+  --color-tc-hairline-strong: var(--tc-hairline-strong);
+  --color-tc-panel: var(--tc-panel);
+  --color-tc-panel-border: var(--tc-panel-border);
+  --color-tc-amber: var(--tc-amber);
+  --color-tc-amber-ink: var(--tc-amber-ink);
+  --color-tc-amber-ink-strong: var(--tc-amber-ink-strong);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,4 +78,90 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* The canvas surface owns its own light paper background regardless of the
+   shell's dark-mode default — dark-mode canvas adaptation is out of scope
+   for this pass (design brief: "propose a dark-mode variant only after
+   light is solid"). */
+.tc-scope {
+  color-scheme: light;
+  font-family: var(--font-tc-content);
+  color: var(--tc-ink);
+}
+
+/* Group-select marquee (Cmd/Ctrl + drag anywhere on the canvas — React
+   Flow's own box selection, themed via its CSS vars) — the library default
+   is an out-of-palette blue that would be the one un-designed thing on the
+   whole canvas. Ink-toned instead, matching HumanNode's own selected-state
+   ring (rgba(43,38,34,...) === --tc-ink) so a marquee-selected group and a
+   single selected node read as the same visual language. */
+.tc-scope {
+  --xy-selection-background-color: rgba(43, 38, 34, 0.05);
+  --xy-selection-border: 1px dashed rgba(43, 38, 34, 0.35);
+}
+
+/* Marquee mode is on while Cmd/Ctrl is held (Canvas.tsx metaHeld). Nodes
+   stop absorbing the pointer so a drag that starts on top of one falls
+   through to the pane's selection-box gesture instead of hitting the
+   node's own click/drag handlers. RF still selects nodes from their
+   positions in its store, so lifting pointer-events on the DOM element
+   doesn't hurt the selection at all. The crosshair on the pane is the
+   only cue "you're in marquee mode now" — no on-screen chrome.
+   !important because Tailwind v4's cascade layering (@layer utilities)
+   ends up letting RF's own .react-flow__node/.draggable rules land in
+   a higher cascade than this stylesheet's, so specificity alone loses.
+   Scoped to this gesture mode, so nothing else on the canvas is
+   affected. */
+.tc-scope.tc-marquee-mode .react-flow__pane {
+  cursor: crosshair !important;
+}
+.tc-scope.tc-marquee-mode .react-flow__node,
+.tc-scope.tc-marquee-mode .react-flow__node * {
+  pointer-events: none !important;
+}
+
+@keyframes tc-qpulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+@keyframes tc-sweep {
+  from { transform: translateX(-110%) skewX(-14deg); }
+  to { transform: translateX(340%) skewX(-14deg); }
+}
+@keyframes tc-wdrift {
+  to { transform: translateX(-720px); }
+}
+@keyframes tc-bloom {
+  from { opacity: 0; transform: scale(.72); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes tc-drawon {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes tc-settle {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.016); }
+  100% { transform: scale(1); }
+}
+@keyframes tc-caret {
+  0%, 100% { opacity: .7; }
+  50% { opacity: .08; }
+}
+@keyframes tc-fadeup {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes tc-popfrombottom {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-scope *, .tc-scope *::before, .tc-scope *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
