@@ -15,11 +15,9 @@ export type HydrationStatus = "loading" | "ready" | "not-found" | "error"
 // uses to skip Supabase writes).
 const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
 
-// The nodes table has no position/width columns (see database.types.ts) — the
-// canvas layout isn't persisted server-side. On re-entry we therefore have to
-// generate positions; this is a plain grid in created_at order. Manual layout
-// won't survive a reload until the schema grows position columns (flagged as a
-// known gap, not worked around here).
+// Fallback layout for pre-migration rows only — nodes.x/y are now persisted
+// (see use-canvas-persistence.ts), so this only fires for rows written before
+// those columns existed and still have them null.
 const GRID = { cols: 3, gapX: 340, gapY: 200, x0: 120, y0: 100 }
 const DEFAULT_WIDTH = 240
 
@@ -164,10 +162,12 @@ export function useCanvasHydration(canvasId: string) {
         id: row.id,
         source: row.from_node_id,
         target: row.to_node_id,
-        // Stored uppercase; React Flow's handle ids are lowercase. Undefined
-        // (null column, pre-migration rows) lets React Flow pick a default side.
-        sourceHandle: row.from_handle?.toLowerCase() ?? undefined,
-        targetHandle: row.to_handle?.toLowerCase() ?? undefined,
+        // from_handle/to_handle store just the bare side, uppercase (e.g.
+        // "RIGHT") — rebuild HumanNode's actual handle id ("right-source"/
+        // "right-target") from it. Undefined (null column) lets React Flow
+        // pick a default side.
+        sourceHandle: row.from_handle ? `${row.from_handle.toLowerCase()}-source` : undefined,
+        targetHandle: row.to_handle ? `${row.to_handle.toLowerCase()}-target` : undefined,
         edgeType: toHumanEdgeType(row.edge_type),
         synced: true,
       }))

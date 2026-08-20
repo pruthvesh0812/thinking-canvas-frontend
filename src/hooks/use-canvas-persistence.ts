@@ -1,8 +1,35 @@
 import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
+import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
+
+// How long a guarded delete stays undoable before it commits for real. Kept
+// as module state, not store state — it's a side-effect timer, not display
+// data (create-zustand-store.md: actions live in stores, timers don't). Node
+// and edge deletes get separate timer maps (their ids are never compared
+// against each other) but share one toast slot in canvas-ui-store.
+const DELETE_UNDO_WINDOW_MS = 5000
+const pendingNodeDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const pendingEdgeDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Keyed by a synthetic "batch:<uuid>" (requestNodesDelete), not a node id —
+// a group delete is one action with one undo, not N independent ones.
+const pendingGroupDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function nodeDeleteLabel(content: string): string {
+  const firstLine = (content.split("\n")[0] ?? "").trim()
+  if (!firstLine) return "Untitled node"
+  return firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine
+}
+
+function groupDeleteLabel(count: number): string {
+  return `${count} nodes`
+}
+
+function edgeDeleteLabel(edgeType: HumanEdgeType): string {
+  return edgeType === "question" ? "Question edge" : "Logical edge"
+}
 
 // Flip to "true" to fall back to the old local-only mock (no Supabase writes)
 // without deleting the real path below — useful if local Supabase is down.
@@ -24,6 +51,17 @@ function currentIds(): { canvasId: string; sessionId: string } | null {
   const resolvedSession = sessionId ?? DEV_SESSION_ID
   if (!resolvedCanvas || !resolvedSession) return null
   return { canvasId: resolvedCanvas, sessionId: resolvedSession }
+}
+
+// React Flow handle ids are "<side>-source" / "<side>-target" (HumanNode.tsx
+// — one handle pair per side). The DB's from_handle/to_handle check
+// constraint only allows the bare side, uppercase ('TOP'|'RIGHT'|'BOTTOM'|
+// 'LEFT') — NOT the whole compound id uppercased, which is what caused
+// edges_from_handle_check to reject every insert. Strip the -source/-target
+// suffix before uppercasing.
+function handleSide(handle: string | null | undefined): string | null {
+  if (!handle) return null
+  return handle.split("-")[0].toUpperCase()
 }
 
 // The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to notify
@@ -150,6 +188,25 @@ export function useCanvasPersistence() {
     logger.debug("[persistence] node layout persisted", { nodeId })
   }
 
+  // Drag-to-bend commit (EdgeBendHandle) — would persist bend_x/bend_y for
+  // an edge that already has a Supabase row, same shape and same
+  // "frontend owns this column, backend never reads it" convention as
+  // persistNodeLayout/writeNodeLayout above (nodes got x/y/width/height this
+  // way in the 2026-08-11 layout contract update). NOT wired to a real write
+  // yet: the edges table has no bend_x/bend_y columns — types/database.types.ts
+  // is generated from the live schema and doesn't have them, so an update
+  // here would just 400 on every drag. The bend still lives correctly in
+  // canvas-store; it just won't survive a reload until that migration lands
+  // and this TODO is turned into the same update(...).eq("id", ...) call
+  // writeNodeLayout uses.
+  // TODO(contract-layer): add bend_x/bend_y (nullable float8) to edges, then
+  // supabase.from("edges").update({ bend_x, bend_y }).eq("id", edgeId).
+  function persistEdgeBend(edgeId: string) {
+    logger.debug("[persistence] edge bend changed (not yet persisted — bend_x/bend_y column pending)", {
+      edgeId,
+    })
+  }
+
   // Any edge touching this node that stayed local-only because this node
   // (or possibly still the other end) wasn't synced yet. Runs after every
   // successful node write, not just the "first" one, since either endpoint
@@ -211,18 +268,17 @@ export function useCanvasPersistence() {
     // both_existing is always true today — Canvas.tsx's onConnect only fires
     // between two nodes already on the canvas; there is no "drag to empty
     // space creates a child node" gesture yet (STATE-MANAGEMENT.md).
-    // Handle ids (which side each end attaches to, e.g. "right-source") are
-    // stored uppercase per the contract; React Flow's actual handle ids are
-    // lowercase, so hydration lowercases them back. Null when the edge was
-    // drawn without a specific handle.
+    // from_handle/to_handle store just the bare side (TOP/RIGHT/BOTTOM/LEFT,
+    // uppercase — a DB check constraint), not the whole "right-source"
+    // compound id React Flow uses. See handleSide.
     const { error } = await supabase.from("edges").insert({
       id: edge.id,
       canvas_id: canvasId,
       session_id: sessionId,
       from_node_id: edge.source,
       to_node_id: edge.target,
-      from_handle: edge.sourceHandle?.toUpperCase() ?? null,
-      to_handle: edge.targetHandle?.toUpperCase() ?? null,
+      from_handle: handleSide(edge.sourceHandle),
+      to_handle: handleSide(edge.targetHandle),
       edge_type: edge.edgeType,
       both_existing: true,
     })
@@ -243,7 +299,13 @@ export function useCanvasPersistence() {
     // only, once notifying the backend is turned on.
   }
 
-  function deleteNode(nodeId: string) {
+  // Guarded delete (Node Delete UI): hides the node immediately — same
+  // optimistic cascade the old instant delete did — but holds the real
+  // Supabase write behind a 5s undo window shown as a toast
+  // (canvas-ui-store's pendingDelete). Confirming *before* this runs is the
+  // caller's job (HumanNode's confirm popover / Backspace-on-selected); this
+  // is the "committed, but still reversible for a few seconds" half.
+  function requestNodeDelete(nodeId: string) {
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
     // Ghost ids never appear in canvas-store (no-op by lookup failing), and
     // AI-owned nodes are excluded by design (CANVAS-RENDERING.md — delete is
@@ -262,16 +324,51 @@ export function useCanvasPersistence() {
     useCanvasStore.getState().removeNode(nodeId)
     useGhostStore.getState().dismiss(nodeId)
 
+    useCanvasUiStore.getState().setPendingDelete({
+      id: nodeId,
+      label: nodeDeleteLabel(node.data.content),
+      undo: () => undoNodeDelete(nodeId, node, connectedEdges),
+    })
+
+    const timer = setTimeout(() => {
+      pendingNodeDeleteTimers.delete(nodeId)
+      // Only clear the toast if it's still showing THIS node — a later
+      // delete may already have replaced it, and that one's own timer owns
+      // clearing it now.
+      if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
+        useCanvasUiStore.getState().setPendingDelete(null)
+      }
+      void commitNodeDelete(node, connectedEdges)
+    }, DELETE_UNDO_WINDOW_MS)
+    pendingNodeDeleteTimers.set(nodeId, timer)
+  }
+
+  function undoNodeDelete(nodeId: string, node: CanvasNode, connectedEdges: CanvasEdge[]) {
+    const timer = pendingNodeDeleteTimers.get(nodeId)
+    if (timer) {
+      clearTimeout(timer)
+      pendingNodeDeleteTimers.delete(nodeId)
+    }
+    useCanvasStore.getState().restoreNode(node, connectedEdges)
+    if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
+      useCanvasUiStore.getState().setPendingDelete(null)
+    }
+  }
+
+  // Runs once the undo window has elapsed with no undo — the actual
+  // Supabase delete, same write/rollback shape the old instant deleteNode
+  // used (restoreNode on failure puts the node back exactly like an undo).
+  async function commitNodeDelete(node: CanvasNode, connectedEdges: CanvasEdge[]) {
     if (!node.data.synced) {
       // Never had a Supabase row — and per the sync rule, neither did any
       // edge that only ever touched it — so there's nothing to delete
       // server-side.
-      logger.debug("[persistence] uncommitted node removed locally only", { nodeId })
+      logger.debug("[persistence] uncommitted node removed locally only", { nodeId: node.id })
       return
     }
 
     if (USE_MOCK_PERSISTENCE) {
-      logger.debug("[persistence] node removed (mock — no Supabase write)", { nodeId })
+      logger.debug("[persistence] node removed (mock — no Supabase write)", { nodeId: node.id })
       return
     }
 
@@ -279,11 +376,145 @@ export function useCanvasPersistence() {
     // ids — this only confirms we're in a real canvas context before hitting
     // the network at all.
     if (!currentIds()) {
-      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", { nodeId })
+      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", { nodeId: node.id })
       return
     }
 
-    void writeNodeDelete(node, connectedEdges)
+    await writeNodeDelete(node, connectedEdges)
+  }
+
+  // Group select's Backspace/Delete (Canvas.tsx's own keydown listener,
+  // gated on 2+ nodes selected) — one shared confirm-then-undo action for
+  // the whole selection instead of requestNodeDelete called once per node
+  // (which used to pop open one confirm popover per selected node — the
+  // bug this replaces). Same optimistic-cascade / undo-window shape as
+  // requestNodeDelete, just batched: one pendingDelete toast, one undo,
+  // one commit.
+  function requestNodesDelete(nodeIds: string[]) {
+    const allNodes = useCanvasStore.getState().nodes
+    const targets = nodeIds
+      .map((id) => allNodes.find((n) => n.id === id))
+      .filter((n): n is CanvasNode => !!n && n.data.owner === "human")
+    if (targets.length === 0) return
+    // Not actually a group — same single-node path as the kebab menu/solo
+    // Backspace, so it gets that flow's per-node label instead of "1 node".
+    if (targets.length === 1) {
+      requestNodeDelete(targets[0].id)
+      return
+    }
+
+    const targetIds = new Set(targets.map((n) => n.id))
+    const connectedEdges = useCanvasStore
+      .getState()
+      .edges.filter((e) => targetIds.has(e.source) || targetIds.has(e.target))
+
+    // Optimistic — same cascade requestNodeDelete does, just for every
+    // selected node in one pass. removeNode's own edge-filter is safe to
+    // call repeatedly: an edge between two targets is already gone by the
+    // time the second endpoint's removeNode call runs, so that pass is a
+    // no-op for it.
+    for (const node of targets) {
+      useCanvasStore.getState().removeNode(node.id)
+      useGhostStore.getState().dismiss(node.id)
+    }
+
+    const batchKey = `batch:${crypto.randomUUID()}`
+    useCanvasUiStore.getState().setPendingDelete({
+      id: batchKey,
+      label: groupDeleteLabel(targets.length),
+      undo: () => undoNodesDelete(batchKey, targets, connectedEdges),
+    })
+
+    const timer = setTimeout(() => {
+      pendingGroupDeleteTimers.delete(batchKey)
+      if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
+        useCanvasUiStore.getState().setPendingDelete(null)
+      }
+      void commitNodesDelete(targets, connectedEdges)
+    }, DELETE_UNDO_WINDOW_MS)
+    pendingGroupDeleteTimers.set(batchKey, timer)
+  }
+
+  function undoNodesDelete(batchKey: string, nodes: CanvasNode[], edges: CanvasEdge[]) {
+    const timer = pendingGroupDeleteTimers.get(batchKey)
+    if (timer) {
+      clearTimeout(timer)
+      pendingGroupDeleteTimers.delete(batchKey)
+    }
+    useCanvasStore.getState().restoreNodes(nodes, edges)
+    if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
+      useCanvasUiStore.getState().setPendingDelete(null)
+    }
+  }
+
+  // Runs once the undo window elapses with no undo — same shape as
+  // commitNodeDelete, batched. Nodes that never had a Supabase row (still
+  // local-only) are filtered out before the network call the same way
+  // commitNodeDelete's own !node.data.synced check does; if NONE of the
+  // batch was ever synced, there's nothing to send at all.
+  async function commitNodesDelete(nodes: CanvasNode[], edges: CanvasEdge[]) {
+    const syncedNodes = nodes.filter((n) => n.data.synced)
+    if (syncedNodes.length === 0) {
+      logger.debug("[persistence] uncommitted nodes removed locally only", { count: nodes.length })
+      return
+    }
+
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] nodes removed (mock — no Supabase write)", { count: syncedNodes.length })
+      return
+    }
+
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", {
+        count: syncedNodes.length,
+      })
+      return
+    }
+
+    await writeNodesDelete(syncedNodes, edges)
+  }
+
+  async function writeNodesDelete(nodes: CanvasNode[], edges: CanvasEdge[]) {
+    // Edges first, same FK-ordering reason as writeNodeDelete — batched via
+    // .in() instead of one .eq() per row.
+    const syncedEdgeIds = edges.filter((e) => e.synced).map((e) => e.id)
+    if (syncedEdgeIds.length > 0) {
+      const { error: edgeError } = await supabase.from("edges").delete().in("id", syncedEdgeIds)
+      if (edgeError) {
+        logger.warn("[persistence] failed to delete connected edges, restoring nodes", {
+          count: nodes.length,
+          error: edgeError,
+        })
+        useCanvasStore.getState().restoreNodes(nodes, edges)
+        return
+      }
+    }
+
+    const nodeIds = nodes.map((n) => n.id)
+    const { error } = await supabase.from("nodes").delete().in("id", nodeIds)
+    if (error) {
+      // Same asymmetric rollback as writeNodeDelete: edges may already be
+      // gone from Supabase by this point, so only the nodes come back.
+      logger.warn("[persistence] nodes delete failed, restoring nodes", { count: nodes.length, error })
+      useCanvasStore.getState().restoreNodes(nodes)
+      return
+    }
+
+    logger.info("[persistence] nodes deleted from Supabase", { count: nodes.length })
+    // TODO(contract-layer): no node.deleted canvas-event yet, same gap
+    // writeNodeDelete's TODO notes.
+  }
+
+  // Delete-menu "Duplicate" — clones content + layout locally, then seeds
+  // its first Supabase row through the same upsert path a typed node's
+  // first content blur uses (persistNodeContent already no-ops on empty
+  // content, so an empty duplicate stays local-only like any fresh node).
+  function duplicateNode(nodeId: string) {
+    const source = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    if (!source || source.data.owner !== "human") return
+    const clone = useCanvasStore.getState().duplicateNode(nodeId)
+    if (!clone) return
+    persistNodeContent(clone.id, clone.data.content)
   }
 
   async function writeNodeDelete(node: CanvasNode, connectedEdges: CanvasEdge[]) {
@@ -319,6 +550,69 @@ export function useCanvasPersistence() {
     // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
   }
 
+  // Edge hover-delete: unlike requestNodeDelete there's no confirm step
+  // first (an edge has no cascade to warn about) — one click hides it and
+  // starts the same undo window, sharing canvas-ui-store's single toast
+  // slot with node deletes.
+  function requestEdgeDelete(edgeId: string) {
+    const edge = useCanvasStore.getState().edges.find((e) => e.id === edgeId)
+    if (!edge) return
+
+    useCanvasStore.getState().removeEdge(edgeId)
+
+    useCanvasUiStore.getState().setPendingDelete({
+      id: edgeId,
+      label: edgeDeleteLabel(edge.edgeType),
+      undo: () => undoEdgeDelete(edgeId, edge),
+    })
+
+    const timer = setTimeout(() => {
+      pendingEdgeDeleteTimers.delete(edgeId)
+      if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
+        useCanvasUiStore.getState().setPendingDelete(null)
+      }
+      void commitEdgeDelete(edge)
+    }, DELETE_UNDO_WINDOW_MS)
+    pendingEdgeDeleteTimers.set(edgeId, timer)
+  }
+
+  function undoEdgeDelete(edgeId: string, edge: CanvasEdge) {
+    const timer = pendingEdgeDeleteTimers.get(edgeId)
+    if (timer) {
+      clearTimeout(timer)
+      pendingEdgeDeleteTimers.delete(edgeId)
+    }
+    useCanvasStore.getState().restoreEdge(edge)
+    if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
+      useCanvasUiStore.getState().setPendingDelete(null)
+    }
+  }
+
+  async function commitEdgeDelete(edge: CanvasEdge) {
+    if (!edge.synced) {
+      logger.debug("[persistence] uncommitted edge removed locally only", { edgeId: edge.id })
+      return
+    }
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] edge removed (mock — no Supabase write)", { edgeId: edge.id })
+      return
+    }
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping Supabase delete", { edgeId: edge.id })
+      return
+    }
+
+    const { error } = await supabase.from("edges").delete().eq("id", edge.id)
+    if (error) {
+      logger.warn("[persistence] edge delete failed, restoring edge", { edgeId: edge.id, error })
+      useCanvasStore.getState().restoreEdge(edge)
+      return
+    }
+    logger.info("[persistence] edge deleted from Supabase", { edgeId: edge.id })
+    // TODO(contract-layer): there is no edge.deleted canvas-event yet either
+    // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
+  }
+
   function materializeGhost(triggerNodeId: string, slot: GhostPairSlot) {
     // TODO(ghost-interaction, contract-layer): Supabase insert of the
     // accepted node (owner:'ai') + connecting edge, then POST
@@ -328,5 +622,15 @@ export function useCanvasPersistence() {
     logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
   }
 
-  return { persistNodeContent, persistNodeLayout, persistEdge, deleteNode, materializeGhost }
+  return {
+    persistNodeContent,
+    persistNodeLayout,
+    persistEdge,
+    persistEdgeBend,
+    requestNodeDelete,
+    requestNodesDelete,
+    requestEdgeDelete,
+    duplicateNode,
+    materializeGhost,
+  }
 }

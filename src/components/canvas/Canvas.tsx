@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  Background,
+  BackgroundVariant,
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useReactFlow,
   type Edge,
   type EdgeTypes,
@@ -21,7 +25,9 @@ import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
+import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
 
+import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
 import { GhostQuestionNode, type GhostQuestionFlowNode } from "../ghost/GhostQuestionNode"
@@ -64,12 +70,20 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, deleteNode, persistNodeLayout } = useCanvasPersistence()
+  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
+  const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
+  const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
+  const backdropColor = useCanvasUiStore((s) => s.backdropColor)
   const pairs = useGhostStore((s) => s.pairs)
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
+  // History keeps its own deliberate "cooler paper" treatment regardless of
+  // what's picked for the live canvas (CANVAS-RENDERING.md's past-vs-present
+  // contrast is a different concern than this cosmetic preference) — so the
+  // pane only gets an explicit background/pattern outside of history at all.
+  const showCustomBackdrop = !isHistory
   const { fitView } = useReactFlow()
   // Nodes are a controlled prop (derived fresh from canvas-store every
   // render) — React Flow's own internal selection bookkeeping never sticks
@@ -77,6 +91,57 @@ function CanvasInner() {
   // no node was ever actually `selected`, so the delete key (which only
   // acts on selected+deletable nodes) silently had nothing to delete.
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
+  // Cmd/Ctrl held → the whole canvas enters marquee mode: node drag turns
+  // off so a pointerdown that lands on a node falls through to the pane's
+  // own selection-box gesture instead of starting a node drag. window
+  // blur resets it because keyup never fires if the user Cmd-Tabs away
+  // mid-hold.
+  const [metaHeld, setMetaHeld] = useState(false)
+  useEffect(() => {
+    if (isHistory) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Meta" || e.key === "Control") setMetaHeld(true)
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === "Meta" || e.key === "Control") setMetaHeld(false)
+    }
+    function onBlur() {
+      setMetaHeld(false)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
+    window.addEventListener("blur", onBlur)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
+      window.removeEventListener("blur", onBlur)
+    }
+  }, [isHistory])
+
+  // Group delete (2+ nodes selected): a single shared confirm, not one
+  // popover per selected node — HumanNode's own Backspace handling is
+  // gated to fire only when it's the SOLE selected node (data.soloSelected
+  // below), so this is the only path once 2+ are selected. Holds the
+  // snapshotted target ids, not just a boolean, so the confirm/delete
+  // acts on exactly the selection that was live when Backspace was
+  // pressed even if the live selection changes before Delete is clicked.
+  const [groupDeleteConfirm, setGroupDeleteConfirm] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (isHistory) return
+    if (selectedNodeIds.size < 2 && groupDeleteConfirm === null) return
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (selectedNodeIds.size >= 2 && (e.key === "Backspace" || e.key === "Delete")) {
+        e.preventDefault()
+        setGroupDeleteConfirm([...selectedNodeIds])
+      } else if (e.key === "Escape") {
+        setGroupDeleteConfirm(null)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
   const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
@@ -119,8 +184,14 @@ function CanvasInner() {
           onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
+          soloSelected: selectedNodeIds.size === 1 && selectedNodeIds.has(n.id),
         },
-        draggable: !isHistory,
+        // Draggable is controlled at the ReactFlow level (nodesDraggable
+        // below) so Cmd/Ctrl held can disable it globally — that's how a
+        // marquee drag starting on top of a node falls through to the
+        // pane's selection instead of starting a node drag. Ghost nodes
+        // still opt out explicitly (draggable: false is a per-node
+        // override that always wins).
         // Delete is a human-only affordance (CANVAS-RENDERING.md) — an
         // accepted AI node keeps its permanent record, never deletable.
         deletable: !isHistory && n.data.owner === "human",
@@ -178,6 +249,12 @@ function CanvasInner() {
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
         type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
+        // Points at the target end — LogicalEdge/QuestionEdge already thread
+        // markerEnd through to BaseEdge, this is what actually turns it on.
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#6A6154", width: 16, height: 16 },
+        // Hover-to-delete is a live-canvas-only affordance, same rule as
+        // node delete (CANVAS-RENDERING.md).
+        data: { readOnly: isHistory },
       }))
 
     if (isHistory) return humanEdges
@@ -216,11 +293,14 @@ function CanvasInner() {
           if (change.position) updateNodePosition(change.id, change.position)
           if (change.dragging === false) persistNodeLayout(change.id)
         } else if (change.type === "remove") {
-          // Selection + Backspace (React Flow's default deleteKeyCode).
-          // deleteNode no-ops for ghost/AI-owned ids on its own, but the
-          // `deletable: false` set above keeps React Flow from ever
+          // React Flow's own deleteKeyCode is disabled below — the guarded
+          // confirm-then-undo flow lives in HumanNode instead. This branch
+          // is now only a defensive fallback for a programmatic
+          // deleteElements() call, none of which exist today.
+          // requestNodeDelete no-ops for ghost/AI-owned ids on its own, but
+          // the `deletable: false` set above keeps React Flow from ever
           // emitting this change for them in the first place.
-          deleteNode(change.id)
+          requestNodeDelete(change.id)
         } else if (change.type === "select") {
           setSelectedNodeIds((prev) => {
             const next = new Set(prev)
@@ -231,7 +311,7 @@ function CanvasInner() {
         }
       }
     },
-    [updateNodePosition, persistNodeLayout, deleteNode, isHistory],
+    [updateNodePosition, persistNodeLayout, requestNodeDelete, isHistory],
   )
 
   const onConnect: OnConnect = useCallback(
@@ -255,7 +335,7 @@ function CanvasInner() {
 
   return (
     <div
-      className="tc-scope flex h-screen w-full flex-col"
+      className={`tc-scope flex h-screen w-full flex-col ${metaHeld && !isHistory ? "tc-marquee-mode" : ""}`}
       style={{
         // The past sits on a slightly cooler paper than the live canvas —
         // felt, not announced.
@@ -294,7 +374,10 @@ function CanvasInner() {
         </div>
       )}
 
-      <div className="relative flex-1 overflow-hidden">
+      <div
+        className="relative flex-1 overflow-hidden"
+        style={showCustomBackdrop ? backdropPaneStyle(canvasBackdrop, backdropColor) : undefined}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -304,11 +387,51 @@ function CanvasInner() {
           onConnect={onConnect}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
+          // Group select (drag multiple nodes together):
+          //   • plain drag on empty canvas — pans
+          //   • Cmd/Ctrl + drag anywhere (including on top of a node) —
+          //     draws a marquee; every node the box touches is selected
+          //     (SelectionMode.Partial, so you don't have to fully
+          //     enclose one).
+          //   • Shift + click on a node — adds/removes just that node
+          //     from the current selection.
+          //   • plain drag on any one selected node — moves the whole
+          //     group together (React Flow's built-in multi-drag).
+          //     onNodesChange already applies a "position" change per
+          //     node id and commits each via persistNodeLayout on drag
+          //     end, so a group move persists exactly like a single-node
+          //     move, one write per node in it.
+          //
+          // Implementation notes for "Cmd/Ctrl + drag":
+          //   RF's own selectionKeyCode override doesn't beat panOnDrag
+          //   for Meta/Control (works with Shift, not with modifier
+          //   keys), so metaHeld drives the swap ourselves: while held,
+          //   panOnDrag flips off and selectionOnDrag flips on. To make
+          //   "even over a node" work, nodes stop absorbing pointerdown
+          //   in marquee mode — nodesDraggable=false + a scoped
+          //   pointer-events:none rule (globals.css .tc-marquee-mode)
+          //   so the event lands on the pane; RF still selects nodes
+          //   from their positions in its store, not from DOM hits.
+          nodesDraggable={!isHistory && !metaHeld}
+          panOnDrag={!isHistory && !metaHeld}
+          selectionOnDrag={!isHistory && metaHeld}
+          selectionKeyCode={null}
+          multiSelectionKeyCode="Shift"
+          selectionMode={SelectionMode.Partial}
+          // Delete is guarded now (HumanNode's confirm popover) — React
+          // Flow's own instant Backspace/Delete handling would bypass that,
+          // so it's off; HumanNode listens for the key itself while selected.
+          deleteKeyCode={null}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           minZoom={0.4}
           maxZoom={1.75}
           proOptions={{ hideAttribution: true }}
-        />
+        >
+          {showCustomBackdrop && canvasBackdrop === "grid" && (
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={gridDotColor(backdropColor)} />
+          )}
+        </ReactFlow>
+        {!isHistory && <BackdropSwitcher />}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
             <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
@@ -317,6 +440,85 @@ function CanvasInner() {
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
         <SessionInsightsPanel />
+
+        {/* Group delete confirm (2+ nodes selected, Backspace/Delete) — one
+            shared card instead of one per-node popover per selected node.
+            Sits above the undo toast (z-index) for the rare case a
+            previous single/group delete's undo toast is still showing
+            when this opens; the two are otherwise mutually exclusive in
+            time since confirming here immediately replaces this with
+            that same toast. */}
+        {!isHistory && groupDeleteConfirm && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
+            <div
+              className="pointer-events-auto rounded-[10px] p-3.5"
+              style={{
+                width: 280,
+                background: "var(--tc-node)",
+                border: "1px solid var(--tc-node-border)",
+                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
+              }}
+            >
+              <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                Delete {groupDeleteConfirm.length} nodes?
+              </div>
+              <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                You can undo for a few seconds after.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGroupDeleteConfirm(null)}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                  style={{
+                    border: "1px solid var(--tc-hairline-strong)",
+                    background: "transparent",
+                    color: "#6b6257",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestNodesDelete(groupDeleteConfirm)
+                    setGroupDeleteConfirm(null)
+                  }}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                  style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Guarded-delete undo toast (Node Delete UI) — one slot; a second
+            delete while this is showing just replaces the label, it never
+            stacks. requestNodeDelete/undoNodeDelete own the actual timer. */}
+        {!isHistory && pendingDelete && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center"
+            style={{ zIndex: 30 }}
+          >
+            <div
+              className="pointer-events-auto flex items-center gap-3.5 rounded-full px-4 py-2.5 text-[13px] shadow-lg"
+              style={{ background: "var(--tc-ink)", color: "#f5f1e8" }}
+            >
+              <span>{pendingDelete.label} deleted</span>
+              <button
+                type="button"
+                onClick={pendingDelete.undo}
+                className="cursor-pointer border-none bg-transparent p-0 font-semibold underline decoration-1 underline-offset-2"
+                style={{ color: "inherit" }}
+              >
+                Undo
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!isHistory && <CanvasFooter />}

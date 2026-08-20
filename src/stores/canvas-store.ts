@@ -49,6 +49,12 @@ export interface CanvasEdge {
   edgeType: HumanEdgeType
   sourceHandle?: string
   targetHandle?: string
+  /** Absolute canvas point the edge is dragged through — the middle-dot
+   * handle (EdgeBendHandle). Undefined/null means "straight/default curve".
+   * Purely spatial, same frontend-owns-it convention as node x/y/width/height
+   * (use-canvas-persistence.ts's writeNodeLayout) — the backend never reads
+   * it. */
+  bend?: { x: number; y: number } | null
   /** True once this edge has a real Supabase row. An edge drawn to/from a
    * node that isn't synced yet starts false and stays local-only until a
    * retry succeeds (use-canvas-persistence.ts — retryPendingEdges). */
@@ -78,6 +84,11 @@ interface CanvasStore {
   /** click-empty-canvas / "+ New node" — empty node in edit mode
    * (CANVAS-RENDERING.md Canvas Interactions). */
   addNode: (position: { x: number; y: number }) => CanvasNode
+  /** Clones a node's content + layout into a new node offset from the
+   * original — always owner:'human', starts unsynced (the hook seeds its
+   * first Supabase row through the normal content-commit path, same as a
+   * freshly typed node). Delete-menu "Duplicate" action only. */
+  duplicateNode: (id: string) => CanvasNode | undefined
   /** User-drawn edge via the pen rack — type is picked before the drag, so
    * there is no post-hoc type popover (design's edge-creation model).
    * Returns the created edge (its client-generated id is what persistence
@@ -93,9 +104,17 @@ interface CanvasStore {
   /** Rollback for a failed Supabase edge write (STATE-MANAGEMENT.md — the
    * store is optimistic, Supabase is authoritative). */
   removeEdge: (id: string) => void
+  /** Rollback for a failed/undone edge delete — re-adds the exact edge (same
+   * id, same synced flag). Unlike addEdge, mints no new id and doesn't
+   * dedupe on the connection tuple; the edge already existed. */
+  restoreEdge: (edge: CanvasEdge) => void
   /** Flips data.synced true after an edge's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markEdgeSynced: (id: string) => void
+  /** Drag-to-bend commit — every pointermove frame while dragging the
+   * middle-dot handle, same per-frame-update/commit-on-release split as
+   * updateNodePosition/persistNodeLayout. Pass null to straighten. */
+  updateEdgeBend: (id: string, bend: { x: number; y: number } | null) => void
   /** Deletes a node and cascades to any edge touching it (local only — the
    * hook decides whether/how to mirror this to Supabase). Only human-owned
    * nodes are ever passed here (CANVAS-RENDERING.md — "Delete: only
@@ -104,6 +123,11 @@ interface CanvasStore {
   /** Rollback for a failed Supabase node delete — re-adds the node, and
    * optionally the edges that were cascaded away with it. */
   restoreNode: (node: CanvasNode, edges?: CanvasEdge[]) => void
+  /** Batch form of restoreNode — undo/rollback for a multi-node delete
+   * (requestNodesDelete). Adds every node back plus the deduped edge list
+   * once; calling restoreNode per node instead would double-add an edge
+   * that touched two of the restored nodes. */
+  restoreNodes: (nodes: CanvasNode[], edges?: CanvasEdge[]) => void
   /** Materializes an accepted ghost as a real owner:'ai' node + connecting
    * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
   addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
@@ -180,8 +204,35 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node] }))
     return node
   },
+  duplicateNode: (id) => {
+    const source = get().nodes.find((n) => n.id === id)
+    if (!source) return undefined
+    const clone: CanvasNode = {
+      id: crypto.randomUUID(),
+      position: { x: source.position.x + 24, y: source.position.y + 24 },
+      width: source.width,
+      height: source.height,
+      data: { content: source.data.content, owner: "human", sessionNumber: CURRENT_SESSION_NUMBER, synced: false },
+    }
+    set((s) => ({ nodes: [...s.nodes, clone] }))
+    return clone
+  },
   addEdge: (source, target, edgeType, sourceHandle, targetHandle) => {
-    if (get().edges.some((e) => e.source === source && e.target === target)) return undefined
+    // Dedupe on the full connection tuple (nodes + both handle sides), not
+    // just the node pair — otherwise a second edge between the same two
+    // nodes on different handles (e.g. bottom→top already exists, user
+    // draws right→right) would be silently dropped. React Flow can still
+    // double-fire on a single drag, so the exact-same tuple stays deduped.
+    if (
+      get().edges.some(
+        (e) =>
+          e.source === source &&
+          e.target === target &&
+          (e.sourceHandle ?? null) === (sourceHandle ?? null) &&
+          (e.targetHandle ?? null) === (targetHandle ?? null),
+      )
+    )
+      return undefined
     const edge: CanvasEdge = {
       id: crypto.randomUUID(),
       source,
@@ -194,8 +245,11 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     return edge
   },
   removeEdge: (id) => set((s) => ({ edges: s.edges.filter((e) => e.id !== id) })),
+  restoreEdge: (edge) => set((s) => ({ edges: [...s.edges, edge] })),
   markEdgeSynced: (id) =>
     set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, synced: true } : e)) })),
+  updateEdgeBend: (id, bend) =>
+    set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, bend } : e)) })),
   removeNode: (id) =>
     set((s) => ({
       nodes: s.nodes.filter((n) => n.id !== id),
@@ -204,6 +258,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     })),
   restoreNode: (node, edges = []) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
+  restoreNodes: (nodes, edges = []) =>
+    set((s) => ({ nodes: [...s.nodes, ...nodes], edges: [...s.edges, ...edges] })),
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   addSeededNodes: (nodes) => set((s) => ({ nodes: [...s.nodes, ...nodes] })),
