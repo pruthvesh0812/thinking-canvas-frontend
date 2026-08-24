@@ -29,12 +29,17 @@ interface SessionStore {
   returnToLive: () => void
   /** Sets the real canvas/session context after hydrating a canvas from
    * Supabase (use-canvas-hydration.ts). original_intent stays write-once —
-   * this only ever loads it, never offers an edit (non-negotiable #5). */
+   * this only ever loads it, never offers an edit (non-negotiable #5).
+   * sessionNumber is the hydration hook's computed 1-indexed ordinal among
+   * every session this canvas has ever had — must be passed explicitly, or
+   * a freshly created canvas keeps showing the leftover mock default
+   * (CURRENT_SESSION_NUMBER) in the header instead of "Session 1". */
   loadCanvas: (meta: {
     canvasId: string
     sessionId: string
     originalIntent: string
     title: string
+    sessionNumber: number
   }) => void
   /** North-star capture (2b) — write-once at canvas creation. Starts a
    * brand-new canvas's session at 1; the canvas surface pairs this with
@@ -67,12 +72,13 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   viewSession: (sessionNumber) => set({ viewedSession: sessionNumber, insightsMode: "sidebar" }),
   setInsightsMode: (mode) => set({ insightsMode: mode }),
   returnToLive: () => set({ viewedSession: null, insightsMode: "sidebar" }),
-  loadCanvas: ({ canvasId, sessionId, originalIntent, title }) =>
+  loadCanvas: ({ canvasId, sessionId, originalIntent, title, sessionNumber }) =>
     set({
       canvasId,
       sessionId,
       originalIntent,
       canvasTitle: title,
+      sessionNumber,
       viewedSession: null,
       insightsMode: "sidebar",
       phase: "diverging",

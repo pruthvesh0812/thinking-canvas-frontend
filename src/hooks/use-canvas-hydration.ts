@@ -75,23 +75,33 @@ export function useCanvasHydration(canvasId: string) {
         return
       }
 
-      // 2. Active session, or start one
-      const { data: activeSessions, error: sessionError } = await supabase
+      // 2. Every session this canvas has ever had, oldest first — both to
+      // find the active one (if any) and to number it for the header.
+      // sessionNumber is otherwise-derived: the sessions table has no such
+      // column (STATE-MANAGEMENT.md), so it's this row's 1-indexed position
+      // among the canvas's own session history, never the mock default
+      // session-store starts with.
+      const { data: allSessions, error: sessionError } = await supabase
         .from("sessions")
-        .select("id")
+        .select("id, status, start_time")
         .eq("canvas_id", canvasId)
-        .eq("status", "active")
-        .order("start_time", { ascending: false })
-        .limit(1)
+        .order("start_time", { ascending: true })
 
       if (cancelled) return
       if (sessionError) {
-        logger.error("[hydration] failed to look up active session", { canvasId, error: sessionError })
+        logger.error("[hydration] failed to look up sessions", { canvasId, error: sessionError })
         setStatus("error")
         return
       }
 
-      let sessionId = activeSessions?.[0]?.id
+      // Most-recently-started active one — defensive against API-CONTRACT
+      // Known Gap #7 (the backend doesn't reject a second concurrent active
+      // session, even though only one is ever the frontend's convention).
+      const activeSession = [...(allSessions ?? [])].reverse().find((s) => s.status === "active")
+      let sessionId = activeSession?.id
+      const sessionNumber = activeSession
+        ? (allSessions ?? []).findIndex((s) => s.id === activeSession.id) + 1
+        : (allSessions?.length ?? 0) + 1
       // Carry-Forward (SESSION-FLOWS.md): only loaded when this canvas is
       // opening into a genuinely NEW session, not a resumed active one —
       // "on starting a new session on the same canvas". No `resolved`
@@ -190,12 +200,14 @@ export function useCanvasHydration(canvasId: string) {
         sessionId,
         originalIntent: canvas.original_intent,
         title: canvas.title,
+        sessionNumber,
       })
       logger.info("[hydration] canvas loaded", {
         canvasId,
         nodes: nodes.length,
         edges: edges.length,
         carried: carried.length,
+        sessionNumber,
       })
       setStatus("ready")
     }
