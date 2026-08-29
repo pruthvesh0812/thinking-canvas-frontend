@@ -24,6 +24,7 @@ contract impact, and definition of done.
 | 9 | `auth` | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
 | 10 | `billing-and-tiers` | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#4 | ARCHITECTURE + API-CONTRACT |
 | 11 | `observer-structure-ui` | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#2 — **backend-blocked** | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
+| 12 | `session-selector` | Real session history browsing (replaces mock-sessions.ts UI); explicit choice instead of a silent guess when a canvas resume is ambiguous | 8 ⚠gap#8 for the resume half — see story | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
 
 ### Why this order
 
@@ -60,6 +61,7 @@ contract impact, and definition of done.
 | #6 raw markers on one stream (context ghost only) | **story 5** — the ghost store must parse `[NODE_TYPE:]`/`[QUESTION]`/`[ARTICULATION]` and route the question text itself | build the parser now (GHOST-STREAMING → Content Delivery); a backend server-side split would later simplify it |
 | #6b SSE closes after every `done` | story 5 (reconnect is normal; overlapping ghosts truncate) | tolerate reconnect-per-ghost; flag backend hold-open |
 | #7 free tier still gets Outer-Sub on question edges | story 10 (UpgradePrompt logic) | don't gate the question-edge UI on tier until backend gates the pipeline |
+| #8 second active session per canvas isn't rejected by session/start (= API-CONTRACT.md's own gap #7 — numbering here is this table's separate, curated list, not 1:1 with API-CONTRACT's) | story 12's ambiguous-resume handling | backend should return the existing active session instead of creating a second one; frontend degrades gracefully without it (see session-selector story's Risks) |
 
 ---
 
