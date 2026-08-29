@@ -414,10 +414,13 @@ export type SessionStartPayload = {
 
 export type SessionStartResponse = {
   session_id: string
-  // 1-indexed ordinal among every session this canvas has ever had
-  // (priorSessions.length + 1, computed backend-side — not a persisted
-  // column on `sessions`, so it's only ever known at start time, never on
-  // resume of an already-active session).
+  // 1-indexed ordinal among every session this canvas has ever had — not a
+  // persisted column on `sessions`, computed backend-side from
+  // getSessionsByCanvas's existing oldest-first order (array position, or
+  // priorSessions.length + 1 for a brand-new session). This endpoint is
+  // idempotent per canvas: if one is already active, it's returned as-is
+  // (same session_id + session_number) instead of creating a sibling — so
+  // it's safe to call unconditionally, on both a fresh start and a resume.
   session_number: number
 }
 

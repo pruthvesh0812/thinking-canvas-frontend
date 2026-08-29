@@ -6,63 +6,60 @@ status: draft
 git_branch: "[set at implementation: feature/session-selector-<timestamp>]"
 ---
 
+## Update (2026-08-24) — half the original motivation is now resolved
+
+This story was originally written to fix two problems at once: no real UI
+for session history, and an ambiguous canvas-resume path that could
+silently land a human in the wrong session. The backend closed the second
+one directly (`thinking-canvas-be` commit `a46d851`, "Enforce single active
+session per canvas in session/start") — `POST /session/start` is now
+idempotent per canvas: if one session is already active, it's returned
+as-is instead of a sibling being created, so there's no longer a case where
+more than one active session exists to be ambiguous about. `use-canvas-
+hydration.ts` was updated to call it unconditionally (fresh start or
+resume) instead of pre-checking and guessing. See `API-CONTRACT.md`'s
+`POST /api/session/start` section — the closed gap is no longer listed in
+its Known Gaps table.
+
+What's left, and what this story now scopes to: real session **history**
+browsing — `OpenThreadsRail`'s "Past sessions" list and `HistoryBar`'s
+time-travel view are still hardcoded against `mock-sessions.ts`'s 3-session
+demo scenario, even on a real canvas.
+
 ## What
 A page/panel that lists every session a canvas has ever had (open and
-closed) and lets the human pick one — replacing two things that are
-currently faked or fragile: `OpenThreadsRail`'s "Past sessions" list and
-`HistoryBar`'s time-travel view (both hardcoded against `mock-sessions.ts`
-today, real canvases included), and the ambiguous "just guess the most
-recent active session" resume path in `use-canvas-hydration.ts`.
+closed) and lets the human jump into a past one for read-only time-travel —
+replacing `OpenThreadsRail`'s "Past sessions" list and `HistoryBar`'s
+time-travel view, both still rendering `mock-sessions.ts` regardless of
+which real canvas is open.
 
 ## Why
-Two separate problems converge on the same missing UI:
-
-1. **Real session history has no real UI.** `session-lifecycle` landed
-   Session Complete and carry-forward, and `canvas-dashboard` landed real
-   canvas loading, but nothing wired the "past sessions" list or
-   `viewSession()`/`HistoryBar` time-travel to real Supabase data —
-   they still render `mock-sessions.ts`'s 3-session demo scenario
-   regardless of which real canvas is open.
-2. **Resuming a canvas can silently pick the wrong session.** Known Gap #7
-   (`API-CONTRACT.md`) — the backend doesn't reject a second concurrent
-   active session for a canvas. `use-canvas-hydration.ts`'s active-session
-   query always takes "whichever active session started most recently,"
-   with no way to know if that's the one *this browser* was last working
-   in. If two sessions are ever concurrently active (two tabs, two
-   devices, a stray retry), a reload can jump the human into a different
-   session than the one they left — not just show a wrong "Session N"
-   label, but write new nodes against the wrong `session_id`.
-
-A session selector fixes both: real history browsing for (1), and an
-explicit human choice instead of a silent guess for (2).
+`session-lifecycle` landed Session Complete and carry-forward, and
+`canvas-dashboard` landed real canvas loading, but nothing wired the "past
+sessions" list or `viewSession()`/`HistoryBar` to real Supabase data — a
+canvas with real session history still shows the seeded demo's fake dates,
+durations, and Observer notes instead of its own.
 
 ## Context to Load
 `CORE-CONCEPTS.md` + `SESSION-FLOWS.md` + `STATE-MANAGEMENT.md` (Canvas
 Hydration section)
 
 ## Depends On
-canvas-dashboard, session-lifecycle (both implemented). Ideally sequenced
-after a backend fix to Known Gap #7 (see below) — the selector's
-ambiguous-resume path is much simpler to build once `POST /session/start`
-can't produce two concurrently active sessions for the same canvas, but
-the plain "browse history" half of this story doesn't need that fix.
+canvas-dashboard, session-lifecycle (both implemented).
 
 ## Blast Radius
-`use-canvas-hydration.ts`, `session-store.ts`, `OpenThreadsRail.tsx`,
-`HistoryBar.tsx`; new route/component for the selector itself.
+`OpenThreadsRail.tsx`, `HistoryBar.tsx`, `session-store.ts`; new
+component(s) for the selector itself.
 
 ## Files to Touch
 ```
 CREATE:
-  src/app/canvas/[canvasId]/sessions/page.tsx   (or a modal/panel — see Risks)
-  src/components/session/SessionSelector.tsx
+  src/components/session/SessionSelector.tsx   (or inline into
+                                        OpenThreadsRail — see Risks)
 MODIFY:
-  src/hooks/use-canvas-hydration.ts   (route to the selector on an
-                                        ambiguous/mismatched resume instead
-                                        of silently picking one)
-  src/components/canvas/OpenThreadsRail.tsx   (real session_learnings-backed
-                                        node counts + dates instead of
-                                        mock-sessions.ts)
+  src/components/canvas/OpenThreadsRail.tsx   (real session_learnings/nodes
+                                        -backed node counts + dates instead
+                                        of mock-sessions.ts)
   src/components/canvas/HistoryBar.tsx        (real session lookup instead
                                         of getSession() from mock-sessions.ts)
   src/lib/mock-sessions.ts            (keep only for
@@ -71,53 +68,36 @@ MODIFY:
 
 ## Contract Impact
 Supabase reads only — `sessions` (all rows for a canvas, `id, status,
-start_time, end_time, current_phase`), joined against `nodes`/`edges` for
-per-session counts. No new backend endpoints required for the "browse
-history" half.
-
-The "don't silently resume the wrong session" half depends on closing
-**Known Gap #7** backend-side: recommend `POST /session/start` return the
-existing active session (id + a computed ordinal) instead of creating a
-second one when the canvas already has one active, per the remedy
-`API-CONTRACT.md` already names for this gap. Track as a separate
-backend prompt/PR — this story's frontend work degrades gracefully
-without it (falls back to "most recent active, with a visible chance to
-switch" rather than "provably only one active session exists").
+start_time, end_time, current_phase`), joined against `nodes` for
+per-session counts. No backend endpoints needed.
 
 ## Risks
-- **Route vs. modal.** A full page (`/canvas/[canvasId]/sessions`) is
-  simpler to build and matches `OpenThreadsRail`'s existing "past
-  sessions" entry point conceptually, but breaks the single-page canvas
-  feel the rest of the app has (no other canvas interaction navigates
-  away from `/canvas/[canvasId]`). A modal/panel keeps that feel but
-  needs its own layer above `SessionCompleteModal`/`GroupDeleteConfirm`
-  z-indexing. Pick one deliberately, don't default to whichever is less
-  code.
-- **Two concurrently active sessions, no backend fix yet.** If Known Gap
-  #7 isn't closed first, the selector needs to handle *closing* one of
-  two active sessions itself (or refuse to, and just let the human pick
-  which to continue) — decide this explicitly rather than leaving both
-  "active" forever.
-- **`sessionNumber` for closed sessions isn't persisted anywhere either**
-  (see `API-CONTRACT.md`'s `POST /api/session/start` note — the ordinal
-  only exists in that endpoint's response, not as a `sessions` column).
-  This story's history list has to derive numbers for every row the same
-  way hydration does today (position by `start_time` ascending) — don't
-  invent a second derivation that can disagree with hydration's.
+- **`session_number` for a given row isn't persisted anywhere** (see
+  `API-CONTRACT.md`'s `POST /api/session/start` note — the ordinal only
+  ever exists in that endpoint's response, not as a `sessions` column).
+  This story's history list has to derive a number for every row itself —
+  its own array position in an all-sessions-for-canvas query ordered by
+  `start_time` ascending, same derivation the (now-idempotent)
+  `session/start` uses server-side. Don't invent a second scheme that can
+  disagree with it (e.g. don't try to read it off a currently-active
+  session's last-known `session/start` response and reuse that for
+  unrelated closed rows).
 - **`node_sequence` vs. actual node ownership** — per-session node counts
   should come from `nodes.session_id`, not `sessions.node_sequence`
   (backend-written, may not stay in sync with deletes — see
   `STATE-MANAGEMENT.md`).
+- **Where it lives.** `OpenThreadsRail`'s existing "Past sessions" section
+  is the natural home for a short list, but a canvas with many sessions
+  may want its own page/modal rather than growing the rail indefinitely —
+  decide the cutoff (e.g. rail shows N most recent + "see all") rather
+  than defaulting to whichever is less code.
 
 ## Definition of Done
-- Opening "Past sessions" on a real canvas shows that canvas's actual
-  session history (dates, durations from `start_time`/`end_time`, node
-  counts) — never `mock-sessions.ts` content for a non-mock canvas.
-- Clicking a past (closed) session enters the existing read-only
-  `HistoryBar`/time-travel view against real data.
-- If canvas hydration ever finds more than one active session (or a
-  locally-remembered session id that doesn't match the one it resolved),
-  the human is shown a choice instead of the app silently picking one.
+Opening "Past sessions" on a real canvas shows that canvas's actual session
+history (dates, durations from `start_time`/`end_time`, node counts) —
+never `mock-sessions.ts` content for a non-mock canvas. Clicking a past
+(closed) session enters the existing read-only `HistoryBar`/time-travel
+view against real data.
 
 ## Task Breakdown
 NONE — implement directly from this story.

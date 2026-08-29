@@ -75,29 +75,45 @@ export function useCanvasHydration(canvasId: string) {
         return
       }
 
-      // 2. Active session, or start one
-      const { data: activeSessions, error: sessionError } = await supabase
+      // 2. Cheap pre-check: does this canvas already have an active session?
+      // The only thing this answers is whether to load carry-forward
+      // learnings below (only on a genuinely new session, never a resume) —
+      // it does NOT decide which session to resume; step 3 does that.
+      const { data: activeSessions, error: activeCheckError } = await supabase
         .from("sessions")
         .select("id")
         .eq("canvas_id", canvasId)
         .eq("status", "active")
-        .order("start_time", { ascending: false })
         .limit(1)
 
       if (cancelled) return
-      if (sessionError) {
-        logger.error("[hydration] failed to look up active session", { canvasId, error: sessionError })
+      if (activeCheckError) {
+        logger.error("[hydration] failed to check for an active session", { canvasId, error: activeCheckError })
         setStatus("error")
         return
       }
+      const isResuming = (activeSessions?.length ?? 0) > 0
 
-      let sessionId = activeSessions?.[0]?.id
-      // 1-indexed ordinal for the NorthStarHeader ("Session N ▾") — see
-      // STATE-MANAGEMENT.md. sessions has no persisted column for this
-      // (deliberately — see the sync-contract-types note on
-      // SessionStartResponse), so it's only ever known at the moment
-      // POST /api/session/start creates the row; set below once resolved.
+      // 3. Open (or resume) the session. POST /api/session/start is
+      // idempotent per canvas now — the backend enforces at most one active
+      // session and returns the existing one instead of creating a sibling
+      // (API-CONTRACT.md), so it's always safe to call here regardless of
+      // step 2's answer. Its response is the single source for both the
+      // session id and its 1-indexed session_number ordinal — no more
+      // client-side guessing (array position, row counts) for either.
+      let sessionId: string
       let sessionNumber: number
+      try {
+        const res = await sessionStart({ canvas_id: canvasId })
+        sessionId = res.session_id
+        sessionNumber = res.session_number
+      } catch (err) {
+        logger.error("[hydration] session/start failed", { canvasId, error: err })
+        if (!cancelled) setStatus("error")
+        return
+      }
+      if (cancelled) return
+
       // Carry-Forward (SESSION-FLOWS.md): only loaded when this canvas is
       // opening into a genuinely NEW session, not a resumed active one —
       // "on starting a new session on the same canvas". No `resolved`
@@ -105,17 +121,7 @@ export function useCanvasHydration(canvasId: string) {
       // learning ever written re-appears at the next new-session start;
       // flagged here rather than invented around.
       let carriedRows: { id: string; content: string; type: string }[] = []
-      if (!sessionId) {
-        try {
-          const res = await sessionStart({ canvas_id: canvasId })
-          sessionId = res.session_id
-          sessionNumber = res.session_number
-        } catch (err) {
-          logger.error("[hydration] session/start failed", { canvasId, error: err })
-          if (!cancelled) setStatus("error")
-          return
-        }
-
+      if (!isResuming) {
         const { data: learningRows, error: learningsError } = await supabase
           .from("session_learnings")
           .select("id, content, type")
@@ -125,29 +131,9 @@ export function useCanvasHydration(canvasId: string) {
         } else {
           carriedRows = learningRows ?? []
         }
-      } else {
-        // Resuming an already-active session — POST /api/session/start
-        // wasn't called, so there's no response to read session_number off,
-        // and (by construction) this active session was always the most
-        // recent one started, so a plain count of every session this canvas
-        // has ever had IS its ordinal — no row fetch or array-position
-        // logic needed.
-        const { count, error: countError } = await supabase
-          .from("sessions")
-          .select("id", { count: "exact", head: true })
-          .eq("canvas_id", canvasId)
-        if (cancelled) return
-        if (countError) {
-          logger.warn("[hydration] failed to count sessions for resumed session number", {
-            canvasId,
-            error: countError,
-          })
-        }
-        sessionNumber = count ?? 1
       }
-      if (cancelled) return
 
-      // 3. Nodes + edges for the whole canvas (every session — nodes belong
+      // 4. Nodes + edges for the whole canvas (every session — nodes belong
       //    to the canvas, not the session).
       const [{ data: nodeRows, error: nodesError }, { data: edgeRows, error: edgesError }] = await Promise.all([
         supabase

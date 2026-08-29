@@ -183,4 +183,4 @@ Pro-only agent would have fired.
 > question-edge pipeline (Outer Subconscious) is **not** tier-checked, so a free
 > user drawing a question edge does get an Outer-Sub ghost today. Don't gate the
 > question-edge affordance or show an `UpgradePrompt` for it based on tier — see
-> API-CONTRACT Known Gap #7.
+> API-CONTRACT Known Gap #2.
