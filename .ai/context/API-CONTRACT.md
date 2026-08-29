@@ -144,7 +144,7 @@ the Rejection Insights Engine — always collect a reason via
 
 ```typescript
 // Request: { canvas_id: string }
-// Response: { session_id: string }
+// Response: { session_id: string, session_number: number }
 ```
 
 Creates the session row (`status:'active'`, `current_phase:'diverging'`) and,
@@ -153,6 +153,14 @@ thread. Call this when the user opens a canvas without an active session —
 before any node can be created. **Never insert `sessions` rows directly** —
 only one active session per canvas is a *frontend convention*, not something
 the backend enforces (it won't reject a second one).
+
+`session_number` is a 1-indexed ordinal (`priorSessions.length + 1`) for
+display (`NorthStarHeader`'s "Session N") — **not** a persisted column on
+`sessions`, so it only exists in this response. Resuming an already-active
+session (no `session/start` call) has no backend-provided number; the
+frontend falls back to counting the canvas's session rows itself
+(`use-canvas-hydration.ts`) since an active session is always the most
+recently started one.
 
 ### `POST /api/session/complete`
 

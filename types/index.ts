@@ -414,6 +414,11 @@ export type SessionStartPayload = {
 
 export type SessionStartResponse = {
   session_id: string
+  // 1-indexed ordinal among every session this canvas has ever had
+  // (priorSessions.length + 1, computed backend-side — not a persisted
+  // column on `sessions`, so it's only ever known at start time, never on
+  // resume of an already-active session).
+  session_number: number
 }
 
 // POST /api/session/complete
