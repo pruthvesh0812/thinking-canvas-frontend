@@ -2,102 +2,89 @@
 feature: "session-selector"
 type: story
 created: 2026-08-24
-status: draft
-git_branch: "[set at implementation: feature/session-selector-<timestamp>]"
+status: partially-implemented
+git_branch: "claude/new-canvas-north-star-bug-taof6j"
 ---
 
-## Update (2026-08-24) — half the original motivation is now resolved
+## Update (2026-08-24, second pass) — SessionLanding shipped; OpenThreadsRail remains
 
-This story was originally written to fix two problems at once: no real UI
-for session history, and an ambiguous canvas-resume path that could
-silently land a human in the wrong session. The backend closed the second
-one directly (`thinking-canvas-be` commit `a46d851`, "Enforce single active
-session per canvas in session/start") — `POST /session/start` is now
-idempotent per canvas: if one session is already active, it's returned
-as-is instead of a sibling being created, so there's no longer a case where
-more than one active session exists to be ambiguous about. `use-canvas-
-hydration.ts` was updated to call it unconditionally (fresh start or
-resume) instead of pre-checking and guessing. See `API-CONTRACT.md`'s
-`POST /api/session/start` section — the closed gap is no longer listed in
-its Known Gaps table.
+Most of this story landed as `SessionLanding` (`src/components/session/
+SessionLanding.tsx`) — real session history browsing on reopening a canvas,
+via `src/lib/session-history.ts`'s `fetchSessionHistory` (real `sessions`
+rows: id, status, start_time, end_time, node counts from `nodes.session_id`,
+1-indexed ordinal matching `POST /api/session/start`'s own derivation).
+`HistoryBar.tsx` reads real `session-store.pastSessions` in non-mock mode
+instead of `mock-sessions.ts`. Session Complete's "Done" (screen 3) also
+routes through this same screen now (`use-session-lifecycle.ts`'s
+`startNewSession` → `returnToSessionLanding`) rather than opening the next
+session directly — see `SESSION-FLOWS.md`.
 
-What's left, and what this story now scopes to: real session **history**
-browsing — `OpenThreadsRail`'s "Past sessions" list and `HistoryBar`'s
-time-travel view are still hardcoded against `mock-sessions.ts`'s 3-session
-demo scenario, even on a real canvas.
+Earlier update (same day, first pass): the ambiguous-resume half of this
+story's original motivation resolved separately — `thinking-canvas-be`
+commit `a46d851` made `POST /session/start` idempotent per canvas (returns
+the existing active session instead of creating a sibling), closing
+`API-CONTRACT.md`'s Known Gap #7. `use-canvas-hydration.ts` now defers that
+call entirely (rather than calling it eagerly) whenever there's closed
+history and nothing active — see `SessionLanding`'s doc comment.
+
+**What's left:** `OpenThreadsRail`'s own "Past sessions" section (the
+in-canvas rail, a *different* entry point into `viewSession()` than
+SessionLanding) is still hardcoded against `mock-sessions.ts`'s 3-session
+demo scenario. The real data it needs (`session-store.pastSessions`) now
+exists — wiring it up is a small follow-up, not a rewrite.
 
 ## What
-A page/panel that lists every session a canvas has ever had (open and
-closed) and lets the human jump into a past one for read-only time-travel —
-replacing `OpenThreadsRail`'s "Past sessions" list and `HistoryBar`'s
-time-travel view, both still rendering `mock-sessions.ts` regardless of
-which real canvas is open.
+Wire `OpenThreadsRail`'s "Past sessions" list to `session-store.pastSessions`
+(real data, same as `SessionLanding`/`HistoryBar` already use) instead of
+`mock-sessions.ts`, so a real canvas's in-canvas history rail matches its
+real session history rather than the seeded demo's fake dates and counts.
 
 ## Why
-`session-lifecycle` landed Session Complete and carry-forward, and
-`canvas-dashboard` landed real canvas loading, but nothing wired the "past
-sessions" list or `viewSession()`/`HistoryBar` to real Supabase data — a
-canvas with real session history still shows the seeded demo's fake dates,
-durations, and Observer notes instead of its own.
+`SessionLanding` and `HistoryBar` both read real session history now;
+`OpenThreadsRail` is the one remaining surface still showing fabricated
+data for a real canvas — worth closing rather than leaving two "past
+sessions" UIs disagreeing with each other on the same live canvas.
 
 ## Context to Load
-`CORE-CONCEPTS.md` + `SESSION-FLOWS.md` + `STATE-MANAGEMENT.md` (Canvas
-Hydration section)
+`SESSION-FLOWS.md` + `STATE-MANAGEMENT.md`
 
 ## Depends On
-canvas-dashboard, session-lifecycle (both implemented).
+None further — `session-store.pastSessions` and `session-history.ts`
+already exist.
 
 ## Blast Radius
-`OpenThreadsRail.tsx`, `HistoryBar.tsx`, `session-store.ts`; new
-component(s) for the selector itself.
+`OpenThreadsRail.tsx` only.
 
 ## Files to Touch
 ```
-CREATE:
-  src/components/session/SessionSelector.tsx   (or inline into
-                                        OpenThreadsRail — see Risks)
 MODIFY:
-  src/components/canvas/OpenThreadsRail.tsx   (real session_learnings/nodes
-                                        -backed node counts + dates instead
-                                        of mock-sessions.ts)
-  src/components/canvas/HistoryBar.tsx        (real session lookup instead
-                                        of getSession() from mock-sessions.ts)
-  src/lib/mock-sessions.ts            (keep only for
-                                        NEXT_PUBLIC_USE_MOCK_PERSISTENCE mode)
+  src/components/canvas/OpenThreadsRail.tsx   (real session-store.pastSessions
+                                        node counts + dates instead of
+                                        PAST_SESSIONS/mock-sessions.ts, in
+                                        non-mock mode — mirror HistoryBar.tsx's
+                                        USE_MOCK_PERSISTENCE branch)
 ```
 
 ## Contract Impact
-Supabase reads only — `sessions` (all rows for a canvas, `id, status,
-start_time, end_time, current_phase`), joined against `nodes` for
-per-session counts. No backend endpoints needed.
+None — `session-store.pastSessions` is already populated by hydration.
 
 ## Risks
-- **`session_number` for a given row isn't persisted anywhere** (see
-  `API-CONTRACT.md`'s `POST /api/session/start` note — the ordinal only
-  ever exists in that endpoint's response, not as a `sessions` column).
-  This story's history list has to derive a number for every row itself —
-  its own array position in an all-sessions-for-canvas query ordered by
-  `start_time` ascending, same derivation the (now-idempotent)
-  `session/start` uses server-side. Don't invent a second scheme that can
-  disagree with it (e.g. don't try to read it off a currently-active
-  session's last-known `session/start` response and reuse that for
-  unrelated closed rows).
-- **`node_sequence` vs. actual node ownership** — per-session node counts
-  should come from `nodes.session_id`, not `sessions.node_sequence`
-  (backend-written, may not stay in sync with deletes — see
-  `STATE-MANAGEMENT.md`).
-- **Where it lives.** `OpenThreadsRail`'s existing "Past sessions" section
-  is the natural home for a short list, but a canvas with many sessions
-  may want its own page/modal rather than growing the rail indefinitely —
-  decide the cutoff (e.g. rail shows N most recent + "see all") rather
-  than defaulting to whichever is less code.
+- `OpenThreadsRail`'s `nodeCountFor` currently counts `canvas-store` nodes
+  by `data.sessionNumber` (per-node, live-canvas-scoped) rather than
+  `PastSessionSummary.nodeCount` (pre-aggregated at hydration time) — decide
+  which source of truth to keep; they should already agree since hydration
+  now tags real nodes' `sessionNumber` correctly (`use-canvas-hydration.ts`),
+  but computing it twice two different ways invites future drift.
+- Mock mode's own exercise of the rail (`PAST_SESSIONS`) must keep working
+  unchanged — same `USE_MOCK_PERSISTENCE` branch `HistoryBar.tsx` already
+  uses as the template.
 
 ## Definition of Done
-Opening "Past sessions" on a real canvas shows that canvas's actual session
-history (dates, durations from `start_time`/`end_time`, node counts) —
-never `mock-sessions.ts` content for a non-mock canvas. Clicking a past
-(closed) session enters the existing read-only `HistoryBar`/time-travel
-view against real data.
+Opening the Threads rail's "Past sessions" section on a real canvas shows
+that canvas's actual session history — never `mock-sessions.ts` content for
+a non-mock canvas. Clicking a past session there enters the same real
+`HistoryBar`/time-travel view `SessionLanding`'s equivalent action already
+does.
 
 ## Task Breakdown
 NONE — implement directly from this story.

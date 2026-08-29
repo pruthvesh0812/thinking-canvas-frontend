@@ -34,16 +34,23 @@ an edit affordance "just in case" — immutability is the feature.
 ## Session Start (reopening an existing canvas)
 
 ```
-1. Load canvas + look for a session with status='active'
-2. Active session exists → resume it (hydrate canvas, open SSE)
-3. None → POST /api/session/start
-     backend creates the row and, if prior sessions exist, drops a
-     session-boundary marker into every agent thread (invisible to the UI)
-4. Load carried-forward learnings (see Carry-Forward below)
+1. Load canvas + this canvas's whole session history (session-history.ts)
+2. An active session exists, OR no closed history at all (brand-new canvas)
+     → POST /api/session/start right away (idempotent — resumes the active
+       one, or creates the canvas's first session). Straight to the live
+       canvas, same as always.
+3. Otherwise (closed history exists, nothing active — "you finished this
+   before") → DON'T call session/start yet. Render SessionLanding instead
+   of the canvas: "Continue thinking" or pick a past session to browse.
+   Only that deliberate click calls session/start and loads carry-forward
+   (see Carry-Forward below) — see use-session-lifecycle.ts's
+   continueToNewSession.
 ```
 
-A canvas has at most one active session. The frontend never creates session
-rows directly — session lifecycle is backend-owned (it has thread side effects).
+A canvas has at most one active session — `session/start` enforces this
+server-side now (returns the existing active session instead of creating a
+sibling). The frontend never creates session rows directly — session
+lifecycle is backend-owned (it has thread side effects).
 
 ---
 
@@ -85,8 +92,11 @@ Click "Session Complete"
   │     Actions per item: Carry Forward / Resolve now / Discard
   │
   └── Screen 3 — SESSION CLOSED
-        Confirmation. North star preserved. [Start New Session] carries the
-        selected items forward.
+        Confirmation. North star preserved. [Done] persists the selected
+        carry-forwards to session_learnings and hands off to SessionLanding
+        (below) — it does NOT open the next session itself. Real backend
+        only; mock mode keeps the old un-deferred swap (no backend to
+        round-trip a SessionLanding redirect through).
 ```
 
 > Ordering note: today's backend accepts `carry_forward_ids` on the complete
@@ -99,10 +109,13 @@ Click "Session Complete"
 
 ## Carry-Forward (next session start)
 
-On starting a new session on the same canvas, load `session_learnings` rows
-that haven't been resolved and render them as **pre-loaded unresolved nodes** —
-visually distinct from fresh nodes (e.g. a "carried from last session" badge),
-positioned in a dedicated area, ready to continue.
+Loaded at the moment a new session actually starts — continueToNewSession
+(use-session-lifecycle.ts), never during hydration itself (see Session
+Start above: a canvas with closed history renders SessionLanding first,
+without touching session_learnings, until "Continue" is clicked). Reads
+`session_learnings` rows for the canvas and renders them as **pre-loaded
+unresolved nodes** — visually distinct from fresh nodes (a "carried from
+last session" badge), positioned in a dedicated area, ready to continue.
 
 ---
 

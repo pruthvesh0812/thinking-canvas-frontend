@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
 import { Canvas } from '@/components/canvas/Canvas'
 import { SessionLanding } from '@/components/session/SessionLanding'
 import { useCanvasHydration } from '@/hooks/use-canvas-hydration'
+import { useSessionLifecycle } from '@/hooks/use-session-lifecycle'
 import { useSessionStore } from '@/stores/session-store'
 
 // Loads the real canvas addressed by the route (its nodes/edges, active
@@ -13,13 +13,14 @@ import { useSessionStore } from '@/stores/session-store'
 // In mock mode the hook no-ops and reports ready immediately, leaving the
 // seeded demo graph in canvas-store.
 export function CanvasShell({ canvasId }: { canvasId: string }) {
-  const { status, showSessionLanding } = useCanvasHydration(canvasId)
-  // Local, not store state — a one-shot "the human already answered
-  // SessionLanding's question this visit" flag. showSessionLanding itself
-  // stays true for the rest of this mount once hydration sets it (see the
-  // hook), so this is what actually makes the landing screen go away.
-  const [landingDismissed, setLandingDismissed] = useState(false)
+  const status = useCanvasHydration(canvasId)
+  // Store state, not local — session-store.showSessionLanding is also set
+  // later by use-session-lifecycle.ts's startNewSession (Session Complete's
+  // "Done" hands off back here, same screen as reopening a closed canvas),
+  // not just by this mount's own hydration.
+  const showSessionLanding = useSessionStore((s) => s.showSessionLanding)
   const viewSession = useSessionStore((s) => s.viewSession)
+  const { continueToNewSession } = useSessionLifecycle()
 
   if (status === 'loading') {
     return (
@@ -50,13 +51,13 @@ export function CanvasShell({ canvasId }: { canvasId: string }) {
     )
   }
 
-  if (showSessionLanding && !landingDismissed) {
+  if (showSessionLanding) {
     return (
       <SessionLanding
-        onContinue={() => setLandingDismissed(true)}
-        onViewSession={(sessionNumber) => {
+        onContinue={continueToNewSession}
+        onViewSession={async (sessionNumber) => {
+          await continueToNewSession()
           viewSession(sessionNumber)
-          setLandingDismissed(true)
         }}
       />
     )

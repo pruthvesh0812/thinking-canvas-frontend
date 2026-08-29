@@ -1,6 +1,5 @@
 import { create } from "zustand"
 import type { SessionPhase } from "@/types"
-import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 
 /** How the session insights surface is presented. The same content renders
  * docked beside the historical canvas ('sidebar') or expanded over it
@@ -8,16 +7,16 @@ import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 export type InsightsMode = "sidebar" | "full"
 
 /** One row for SessionLanding's list and HistoryBar's "viewing Session N"
- * label — computed by use-canvas-hydration.ts from real `sessions` rows,
- * never mock-sessions.ts, for a real canvas. `number` uses the same
- * 1-indexed-by-start_time derivation POST /api/session/start uses
- * server-side (see API-CONTRACT.md), so it never disagrees with the live
- * session's own number. Closed sessions only — the live/active one has its
- * own session-store fields, it's never also a row here. */
+ * label — computed by use-canvas-hydration.ts / session-history.ts from
+ * real `sessions` rows, never mock-sessions.ts, for a real canvas. `number`
+ * uses the same 1-indexed-by-start_time derivation POST /api/session/start
+ * uses server-side (see API-CONTRACT.md), so it never disagrees with the
+ * live session's own number. Closed sessions only — the live/active one has
+ * its own session-store fields, it's never also a row here. */
 export interface PastSessionSummary {
   id: string
   number: number
-  /** Pre-formatted for display (e.g. "Jun 28, 2026") — hydration's job,
+  /** Pre-formatted for display (e.g. "Jun 28, 2026") — the fetcher's job,
    * not the component's, same as every other derived label in this store. */
   date: string
   /** null on the rare closed-but-no-end_time row (shouldn't happen, but
@@ -28,55 +27,71 @@ export interface PastSessionSummary {
 
 interface SessionStore {
   /** The real Supabase ids of the canvas currently open and its active
-   * session. null until a real canvas is hydrated (use-canvas-hydration.ts);
-   * the persistence hook reads these to hang node/edge writes off the actual
-   * canvas/session instead of dev env vars. */
+   * session. canvasId is null until a real canvas is hydrated
+   * (use-canvas-hydration.ts). sessionId/sessionNumber are ALSO null
+   * whenever showSessionLanding is true — a live session is only ever
+   * established by SessionLanding's "Continue" (use-session-lifecycle.ts's
+   * continueToNewSession), never eagerly. The persistence hook reads
+   * sessionId to hang node/edge writes off it (falls back to dev env vars);
+   * null there correctly means "nothing to write against yet" — Canvas.tsx
+   * isn't even rendered while it's null, so nothing tries. */
   canvasId: string | null
   sessionId: string | null
   originalIntent: string
   canvasTitle: string
-  sessionNumber: number
+  sessionNumber: number | null
   canvasPosition: string
   phase: SessionPhase
   /** null = the live session. A number puts the canvas into read-only
    * time-travel for that past session (design brief §Session History). */
   viewedSession: number | null
-  /** This canvas's closed session history — set on hydration (real canvas)
-   * or startNewCanvas (empty, mock/fresh). SessionLanding's list and
-   * HistoryBar's real-mode label both read this; it's never mutated after
-   * hydration (closed sessions don't change). */
+  /** This canvas's closed session history. Set on hydration (real canvas,
+   * possibly empty) or startNewCanvas (empty, mock/fresh), and refreshed by
+   * returnToSessionLanding once a session closes. SessionLanding's list and
+   * HistoryBar's real-mode label both read this. */
   pastSessions: PastSessionSummary[]
+  /** True whenever there's history to decide about but no live session
+   * established yet — CanvasShell renders SessionLanding instead of
+   * <Canvas /> while this holds. Set by loadCanvas (reopening a canvas with
+   * closed-but-no-active history) and returnToSessionLanding (a session
+   * was just closed via Session Complete); cleared by activateSession (the
+   * one deliberate action that actually starts/resumes a session). */
+  showSessionLanding: boolean
   insightsMode: InsightsMode
   setPhase: (phase: SessionPhase) => void
   viewSession: (sessionNumber: number) => void
   setInsightsMode: (mode: InsightsMode) => void
   returnToLive: () => void
-  /** Sets the real canvas/session context after hydrating a canvas from
-   * Supabase (use-canvas-hydration.ts). original_intent stays write-once —
-   * this only ever loads it, never offers an edit (non-negotiable #5).
-   * sessionNumber is the hydration hook's computed 1-indexed ordinal among
-   * every session this canvas has ever had — must be passed explicitly, or
-   * a freshly created canvas keeps showing the leftover mock default
-   * (CURRENT_SESSION_NUMBER) in the header instead of "Session 1". */
+  /** Sets the real canvas context after hydrating from Supabase
+   * (use-canvas-hydration.ts). original_intent stays write-once — this only
+   * ever loads it, never offers an edit (non-negotiable #5). sessionId/
+   * sessionNumber are null (and showSessionLanding true) when hydration
+   * found closed history but nothing active — see activateSession. */
   loadCanvas: (meta: {
     canvasId: string
-    sessionId: string
+    sessionId: string | null
     originalIntent: string
     title: string
-    sessionNumber: number
+    sessionNumber: number | null
     pastSessions: PastSessionSummary[]
+    showSessionLanding: boolean
   }) => void
-  /** North-star capture (2b) — write-once at canvas creation. Starts a
-   * brand-new canvas's session at 1; the canvas surface pairs this with
-   * canvas-store.resetToEmpty() so a fresh canvas never shows seeded nodes. */
+  /** North-star capture (2b) — write-once at canvas creation. A brand-new
+   * canvas has no session yet either (mirrors the real path's deferred
+   * start) — the canvas surface pairs this with canvas-store.resetToEmpty()
+   * so a fresh canvas never shows seeded nodes, and CanvasShell's own mount
+   * flow (continueToNewSession, mock-branched) establishes session 1. */
   startNewCanvas: (originalIntent: string) => void
-  /** Session Complete's "Start New Session" (session-lifecycle story) —
-   * swaps in the freshly opened session and bumps the display session
-   * number. Note: canvas-store.addNode still stamps new nodes with the
-   * hardcoded CURRENT_SESSION_NUMBER mock constant (auth story's flagged
-   * gap), so this only drives header/footer labels until that's wired
-   * through to the store. */
-  advanceSession: (sessionId: string) => void
+  /** Session Complete's "Done" (screen 3, use-session-lifecycle.ts's
+   * startNewSession) — the session that was just closed is gone from
+   * canvasId/sessionId's live meaning, pastSessions is the freshly
+   * refetched history (now including it), and SessionLanding takes over
+   * again exactly like reopening a closed canvas would. */
+  returnToSessionLanding: (pastSessions: PastSessionSummary[]) => void
+  /** The one action that actually puts a session live — SessionLanding's
+   * "Continue" / "view a past session", via continueToNewSession
+   * (use-session-lifecycle.ts). Never called eagerly; see showSessionLanding. */
+  activateSession: (sessionId: string, sessionNumber: number) => void
 }
 
 // original_intent is write-once at canvas creation (session-lifecycle story) —
@@ -86,11 +101,12 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   sessionId: null,
   originalIntent: "Why is our user retention dropping after week 2?",
   canvasTitle: "Retention",
-  sessionNumber: CURRENT_SESSION_NUMBER,
+  sessionNumber: null,
   canvasPosition: "canvas 2 of 4",
   phase: "diverging",
   viewedSession: null,
   pastSessions: [],
+  showSessionLanding: false,
   insightsMode: "sidebar",
   setPhase: (phase) => set({ phase }),
   // Opening a past session always starts docked — the full view is
@@ -98,7 +114,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   viewSession: (sessionNumber) => set({ viewedSession: sessionNumber, insightsMode: "sidebar" }),
   setInsightsMode: (mode) => set({ insightsMode: mode }),
   returnToLive: () => set({ viewedSession: null, insightsMode: "sidebar" }),
-  loadCanvas: ({ canvasId, sessionId, originalIntent, title, sessionNumber, pastSessions }) =>
+  loadCanvas: ({ canvasId, sessionId, originalIntent, title, sessionNumber, pastSessions, showSessionLanding }) =>
     set({
       canvasId,
       sessionId,
@@ -106,6 +122,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       canvasTitle: title,
       sessionNumber,
       pastSessions,
+      showSessionLanding,
       viewedSession: null,
       insightsMode: "sidebar",
       phase: "diverging",
@@ -114,19 +131,32 @@ export const useSessionStore = create<SessionStore>()((set) => ({
     set({
       originalIntent,
       canvasTitle: "Untitled",
+      // Mock mode's canvas is immediately "live" — no hydration ever runs
+      // for it (use-canvas-hydration.ts no-ops entirely under
+      // NEXT_PUBLIC_USE_MOCK_PERSISTENCE), so unlike the real path there's
+      // no deferred-session step to mirror; session 1 starts right here.
       sessionNumber: 1,
       canvasPosition: "canvas 5 of 5",
       phase: "diverging",
       viewedSession: null,
       pastSessions: [],
+      showSessionLanding: false,
       insightsMode: "sidebar",
     }),
-  advanceSession: (sessionId) =>
-    set((s) => ({
-      sessionId,
-      sessionNumber: s.sessionNumber + 1,
-      phase: "diverging",
+  returnToSessionLanding: (pastSessions) =>
+    set({
+      sessionId: null,
+      sessionNumber: null,
+      pastSessions,
+      showSessionLanding: true,
       viewedSession: null,
       insightsMode: "sidebar",
-    })),
+    }),
+  activateSession: (sessionId, sessionNumber) =>
+    set({
+      sessionId,
+      sessionNumber,
+      showSessionLanding: false,
+      phase: "diverging",
+    }),
 }))

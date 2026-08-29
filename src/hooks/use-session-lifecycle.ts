@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { sessionComplete, sessionStart } from "@/lib/api"
 import { logger } from "@/lib/logger"
 import { MOCK_OBSERVER_SUGGESTIONS } from "@/lib/mock-session-complete"
+import { fetchSessionHistory } from "@/lib/session-history"
 import { useCanvasStore, type CanvasNode } from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useSessionCompleteStore, type UnresolvedThread } from "@/stores/session-complete-store"
@@ -141,7 +142,10 @@ export function useSessionLifecycle() {
       data: {
         content: item.content,
         owner: "human",
-        sessionNumber: useSessionStore.getState().sessionNumber,
+        // Only reachable from a live session (ObserverSuggestions renders
+        // inside the modal Canvas.tsx only mounts once one exists), so this
+        // is always real — the fallback is defensive, not expected to fire.
+        sessionNumber: useSessionStore.getState().sessionNumber ?? 1,
         seedSource: "observer_suggestion",
       },
     }
@@ -159,48 +163,109 @@ export function useSessionLifecycle() {
   }, [])
 
   // Screen 3's deliberate click (SESSION-FLOWS.md — "[Start New Session]
-  // carries the selected items forward"). Writes the chosen carry-forwards
-  // to session_learnings — the documented ordering-asymmetry workaround,
+  // carries the selected items forward"). Persists the chosen carry-forwards
+  // to session_learnings (the documented ordering-asymmetry workaround,
   // since carry_forward_ids is validated but ignored by the session/complete
-  // pipeline (API-CONTRACT Known Gap #3) — opens a new session, and
-  // pre-loads the carried items as editable badge-marked nodes.
+  // pipeline — API-CONTRACT Known Gap #3), THEN hands off to SessionLanding
+  // instead of opening the next session itself — that's a separate,
+  // deliberate click on SessionLanding's "Continue" (continueToNewSession
+  // below), same principle as reopening a canvas with closed history.
+  //
+  // Mock mode keeps its original, un-deferred behavior — no real backend to
+  // round-trip a SessionLanding redirect through, so it swaps straight into
+  // a new local session exactly as this action always did.
   const startNewSession = useCallback(async () => {
     const { canvasId, sessionId, sessionNumber } = useSessionStore.getState()
-    const { unresolvedThreads, choices, setStarting } = useSessionCompleteStore.getState()
+    const { unresolvedThreads, choices, setStarting, reset } = useSessionCompleteStore.getState()
     const carried = unresolvedThreads.filter((t) => choices[t.id] === "carry")
 
     setStarting(true)
 
-    if (!USE_MOCK_PERSISTENCE && canvasId && sessionId && carried.length > 0) {
+    if (USE_MOCK_PERSISTENCE) {
+      // A generous y-gap below the observer-suggestion drop zone (y:480) —
+      // both areas hold variable-height cards, so this is a best-effort
+      // separation, not a collision guarantee; either is freely draggable.
+      const carriedNodes: CanvasNode[] = carried.map((t, i) => ({
+        id: crypto.randomUUID(),
+        position: { x: 140 + i * 300, y: 820 },
+        width: 240,
+        data: {
+          content: t.content,
+          owner: "human",
+          sessionNumber: (sessionNumber ?? 0) + 1,
+          seedSource: "carried_forward",
+        },
+      }))
+      useCanvasStore.getState().addSeededNodes(carriedNodes)
+      useSessionStore.getState().activateSession(crypto.randomUUID(), (sessionNumber ?? 0) + 1)
+      logger.info("[session] new session started (mock)", { carried: carriedNodes.length })
+      reset()
+      return
+    }
+
+    if (canvasId && sessionId && carried.length > 0) {
       const { error } = await supabase
         .from("session_learnings")
         .insert(carried.map((t) => ({ canvas_id: canvasId, session_id: sessionId, content: t.content, type: t.kind })))
       if (error) logger.warn("[session] failed to persist carry-forward learnings", { sessionId, error })
     }
 
-    let newSessionId = crypto.randomUUID()
-    if (!USE_MOCK_PERSISTENCE && canvasId) {
-      try {
-        const res = await sessionStart({ canvas_id: canvasId })
-        newSessionId = res.session_id
-      } catch (err) {
-        logger.error("[session] session/start failed for new session", { canvasId, error: err })
-      }
+    const pastSessions = canvasId ? (await fetchSessionHistory(canvasId))?.pastSessions ?? [] : []
+    useSessionStore.getState().returnToSessionLanding(pastSessions)
+    logger.info("[session] session closed — handed off to session landing", { canvasId })
+    reset()
+  }, [])
+
+  // SessionLanding's "Continue thinking" — and, before entering a chosen
+  // past session's read-only view, "view a past session" too, since a live
+  // session always sits underneath history mode (CanvasShell calls this,
+  // then viewSession). The one place POST /api/session/start actually gets
+  // called for a deferred (showSessionLanding) canvas — see session-store's
+  // showSessionLanding doc. Re-reads session_learnings from Supabase rather
+  // than trusting any in-memory carry-forward choices, since this also has
+  // to work for a cold reopen days later with no such state in memory
+  // (same reasoning use-canvas-hydration.ts used to apply here directly).
+  const continueToNewSession = useCallback(async () => {
+    const canvasId = useSessionStore.getState().canvasId
+    if (!canvasId) {
+      logger.error("[session] continueToNewSession called with no canvas in context")
+      return
     }
 
-    // A generous y-gap below the observer-suggestion drop zone (y:480) —
-    // both areas hold variable-height cards, so this is a best-effort
-    // separation, not a collision guarantee; either is freely draggable.
-    const carriedNodes: CanvasNode[] = carried.map((t, i) => ({
-      id: crypto.randomUUID(),
-      position: { x: 140 + i * 300, y: 820 },
-      width: 240,
-      data: { content: t.content, owner: "human", sessionNumber: sessionNumber + 1, seedSource: "carried_forward" },
-    }))
+    let newSessionId: string
+    let newSessionNumber: number
+    try {
+      const res = await sessionStart({ canvas_id: canvasId })
+      newSessionId = res.session_id
+      newSessionNumber = res.session_number
+    } catch (err) {
+      logger.error("[session] session/start failed", { canvasId, error: err })
+      return
+    }
 
-    useCanvasStore.getState().addSeededNodes(carriedNodes)
-    useSessionStore.getState().advanceSession(newSessionId)
-    logger.info("[session] new session started", { newSessionId, carried: carriedNodes.length })
+    const { data: learningRows, error: learningsError } = await supabase
+      .from("session_learnings")
+      .select("id, content, type")
+      .eq("canvas_id", canvasId)
+    if (learningsError) {
+      logger.warn("[session] failed to load carried-forward learnings", { canvasId, error: learningsError })
+    } else if (learningRows && learningRows.length > 0) {
+      const carriedNodes: CanvasNode[] = learningRows.map((row, i) => ({
+        id: crypto.randomUUID(),
+        position: { x: 140 + i * 300, y: 820 },
+        width: 240,
+        data: {
+          content: row.content,
+          owner: "human" as const,
+          sessionNumber: newSessionNumber,
+          seedSource: "carried_forward" as const,
+        },
+      }))
+      useCanvasStore.getState().addSeededNodes(carriedNodes)
+    }
+
+    useSessionStore.getState().activateSession(newSessionId, newSessionNumber)
+    logger.info("[session] new session started", { newSessionId, newSessionNumber })
     useSessionCompleteStore.getState().reset()
   }, [])
 
@@ -210,5 +275,6 @@ export function useSessionLifecycle() {
     acceptObserverSuggestion,
     skipAllSuggestions,
     startNewSession,
+    continueToNewSession,
   }
 }
