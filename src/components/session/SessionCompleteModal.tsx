@@ -83,7 +83,7 @@ export function SessionCompleteModal() {
                 className="rounded-full px-6 py-2.5 text-[13.5px] font-semibold"
                 style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: starting ? 0.6 : 1 }}
               >
-                {starting ? "Starting…" : "Start new session →"}
+                {starting ? "Closing…" : "Done →"}
               </button>
             </div>
           )}

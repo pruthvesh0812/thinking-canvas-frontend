@@ -4,8 +4,15 @@ import { useEffect, useRef, useState } from "react"
 import { ensureAnonSession } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { sessionStart } from "@/lib/api"
+import { fetchSessionHistory } from "@/lib/session-history"
 import { logger } from "@/lib/logger"
-import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
+import {
+  useCanvasStore,
+  type CanvasEdge,
+  type CanvasNode,
+  type CanvasSessionBaseline,
+  type HumanEdgeType,
+} from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
 
 export type HydrationStatus = "loading" | "ready" | "not-found" | "error"
@@ -38,10 +45,16 @@ function toHumanEdgeType(raw: string): HumanEdgeType {
 
 // Loads a real canvas from Supabase and pushes it into the stores:
 //   1. Ensure a session (RLS needs auth.uid()); load the canvas row.
-//   2. Find the active session, or start one via POST /api/session/start.
-//   3. Load all nodes + edges for the canvas, map rows → store shapes.
+//   2. Fetch this canvas's whole session history (fetchSessionHistory).
+//   3. Open (or idempotently resume) the current session — UNLESS there's a
+//      real decision to make (closed history exists, nothing active), in
+//      which case this defers to SessionLanding instead of calling
+//      POST /api/session/start eagerly (session-store's showSessionLanding
+//      doc; the actual call happens in use-session-lifecycle.ts's
+//      continueToNewSession, on a deliberate "Continue" click).
+//   4. Load all nodes + edges for the canvas, map rows → store shapes.
 // One run per canvasId (guarded) — see STATE-MANAGEMENT.md Canvas Hydration.
-export function useCanvasHydration(canvasId: string) {
+export function useCanvasHydration(canvasId: string): HydrationStatus {
   const [status, setStatus] = useState<HydrationStatus>(USE_MOCK_PERSISTENCE ? "ready" : "loading")
   const hydratedFor = useRef<string | null>(null)
 
@@ -75,48 +88,33 @@ export function useCanvasHydration(canvasId: string) {
         return
       }
 
-      // 2. Active session, or start one
-      const { data: activeSessions, error: sessionError } = await supabase
-        .from("sessions")
-        .select("id")
-        .eq("canvas_id", canvasId)
-        .eq("status", "active")
-        .order("start_time", { ascending: false })
-        .limit(1)
-
+      // 2. This canvas's whole session history.
+      const history = await fetchSessionHistory(canvasId)
       if (cancelled) return
-      if (sessionError) {
-        logger.error("[hydration] failed to look up active session", { canvasId, error: sessionError })
+      if (!history) {
         setStatus("error")
         return
       }
+      const { isResuming, sessionNumberById, pastSessions } = history
 
-      let sessionId = activeSessions?.[0]?.id
-      // Carry-Forward (SESSION-FLOWS.md): only loaded when this canvas is
-      // opening into a genuinely NEW session, not a resumed active one —
-      // "on starting a new session on the same canvas". No `resolved`
-      // column exists on session_learnings yet (Known Gap), so every
-      // learning ever written re-appears at the next new-session start;
-      // flagged here rather than invented around.
-      let carriedRows: { id: string; content: string; type: string }[] = []
-      if (!sessionId) {
+      // Show SessionLanding only when there's an actual decision to make —
+      // closed history exists, but nothing is active. Neither a brand-new
+      // canvas (zero pastSessions — straight from north-star capture) nor an
+      // active resume (isResuming) ever defers; both proceed straight to a
+      // live session below, same as before showSessionLanding existed.
+      const deferSession = !isResuming && pastSessions.length > 0
+
+      let sessionId: string | null = null
+      let sessionNumber: number | null = null
+      if (!deferSession) {
         try {
           const res = await sessionStart({ canvas_id: canvasId })
           sessionId = res.session_id
+          sessionNumber = res.session_number
         } catch (err) {
           logger.error("[hydration] session/start failed", { canvasId, error: err })
           if (!cancelled) setStatus("error")
           return
-        }
-
-        const { data: learningRows, error: learningsError } = await supabase
-          .from("session_learnings")
-          .select("id, content, type")
-          .eq("canvas_id", canvasId)
-        if (learningsError) {
-          logger.warn("[hydration] failed to load carried-forward learnings", { canvasId, error: learningsError })
-        } else {
-          carriedRows = learningRows ?? []
         }
       }
       if (cancelled) return
@@ -126,12 +124,14 @@ export function useCanvasHydration(canvasId: string) {
       const [{ data: nodeRows, error: nodesError }, { data: edgeRows, error: edgesError }] = await Promise.all([
         supabase
           .from("nodes")
-          .select("id, content, owner, x, y, width, height")
+          .select("id, content, owner, x, y, width, height, session_id")
           .eq("canvas_id", canvasId)
           .order("created_at"),
         supabase
           .from("edges")
-          .select("id, from_node_id, to_node_id, from_handle, to_handle, edge_type")
+          // session_id is needed to build the "I'm done" baseline below —
+          // never rendered, never written back.
+          .select("id, from_node_id, to_node_id, from_handle, to_handle, edge_type, session_id")
           .eq("canvas_id", canvasId),
       ])
 
@@ -153,7 +153,11 @@ export function useCanvasHydration(canvasId: string) {
           content: row.content ?? "",
           owner: row.owner === "ai" ? "ai" : "human",
           aiMarker: row.owner === "ai" ? true : undefined,
-          sessionNumber: 1,
+          // The session that actually created this node (real ordinal, not
+          // a hardcoded 1 regardless of history) — what makes Canvas.tsx's
+          // history dimming/filtering honest once a human is actually
+          // dropped into a real past session (SessionLanding).
+          sessionNumber: sessionNumberById.get(row.session_id) ?? 1,
           synced: true,
         },
       }))
@@ -172,30 +176,39 @@ export function useCanvasHydration(canvasId: string) {
         synced: true,
       }))
 
-      // Carried-forward items land as local-only editable placeholders, badge-
-      // marked (HumanNode.tsx), in a dedicated row below the loaded grid — the
-      // existing content-persistence path picks each one up on first edit,
-      // same as any other new node (use-canvas-persistence.ts).
-      const carryY = GRID.y0 + Math.ceil((nodes.length || 1) / GRID.cols) * GRID.gapY + 160
-      const carried: CanvasNode[] = carriedRows.map((row, i) => ({
-        id: crypto.randomUUID(),
-        position: { x: GRID.x0 + i * GRID.gapX, y: carryY },
-        width: DEFAULT_WIDTH,
-        data: { content: row.content, owner: "human" as const, sessionNumber: 1, seedSource: "carried_forward" as const },
-      }))
+      // "I'm done" baseline (CanvasFooter.tsx) — only rows inherited from a
+      // PRIOR session count as "nothing changed yet". Anything already
+      // stamped with the current live session_id was created/edited in
+      // this session before this hydration ran (e.g. a mid-session
+      // reload), and must read as already-changed, not reset to baseline.
+      const baseline: CanvasSessionBaseline = {
+        nodeContents: Object.fromEntries(
+          (nodeRows ?? []).filter((r) => r.session_id !== sessionId).map((r) => [r.id, r.content ?? ""]),
+        ),
+        edgeLinks: Object.fromEntries(
+          (edgeRows ?? [])
+            .filter((r) => r.session_id !== sessionId)
+            .map((r) => [r.id, `${r.from_node_id}::${r.to_node_id}`]),
+        ),
+      }
 
-      useCanvasStore.getState().hydrate([...nodes, ...carried], edges)
+      useCanvasStore.getState().hydrate(nodes, edges, baseline)
       useSessionStore.getState().loadCanvas({
         canvasId,
         sessionId,
         originalIntent: canvas.original_intent,
         title: canvas.title,
+        sessionNumber,
+        pastSessions,
+        showSessionLanding: deferSession,
       })
       logger.info("[hydration] canvas loaded", {
         canvasId,
         nodes: nodes.length,
         edges: edges.length,
-        carried: carried.length,
+        sessionNumber,
+        pastSessions: pastSessions.length,
+        deferSession,
       })
       setStatus("ready")
     }

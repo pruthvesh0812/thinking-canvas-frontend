@@ -144,15 +144,25 @@ the Rejection Insights Engine — always collect a reason via
 
 ```typescript
 // Request: { canvas_id: string }
-// Response: { session_id: string }
+// Response: { session_id: string, session_number: number }
 ```
 
 Creates the session row (`status:'active'`, `current_phase:'diverging'`) and,
 if prior sessions exist, drops a session-boundary marker into every agent
-thread. Call this when the user opens a canvas without an active session —
-before any node can be created. **Never insert `sessions` rows directly** —
-only one active session per canvas is a *frontend convention*, not something
-the backend enforces (it won't reject a second one).
+thread. **Idempotent per canvas** — if the canvas already has an active
+session, that one is returned as-is (`session_id` + `session_number`
+unchanged) instead of creating a sibling; Known Gap #7 (a second active
+session per canvas going unrejected) is closed. **Still never insert
+`sessions` rows directly** — session lifecycle stays backend-owned.
+
+Because it's idempotent, the frontend calls this **unconditionally** on
+every canvas open — whether starting fresh or resuming — rather than
+pre-checking for an active session and only calling it when none exists
+(`use-canvas-hydration.ts`). This is also the only source for
+`session_number`: a 1-indexed ordinal (`priorSessions.length + 1`, or the
+matched session's array position on an idempotent return) for display
+(`NorthStarHeader`'s "Session N") — **not** a persisted column on
+`sessions`, so it only ever exists in this response.
 
 ### `POST /api/session/complete`
 
@@ -226,7 +236,10 @@ and `sessions.current_phase` (the phase toggle).
 Renumbered against the backend's own audit (`FRONTEND-CONTRACT.md` §11,
 2026-07-19). The three original P0 rows from this file's prior revision —
 `done` carrying nothing, SSE closing per-ghost, no accept-enrichment path —
-are **resolved** and removed from this table.
+are **resolved** and removed from this table. Gap #7 (second active session
+per canvas going unrejected) is also now **resolved** (2026-08-16,
+`thinking-canvas-be` commit `a46d851` — see `POST /api/session/start`
+above) and removed; numbers below aren't renumbered to fill the gap.
 
 | # | Severity | Gap | Impact | Direction |
 |---|---|---|---|---|
@@ -236,7 +249,6 @@ are **resolved** and removed from this table.
 | 4 | P2 | `observerEdgeStatusSchema` exists in `types/index.ts` but **no route implements it** | Per-edge Observer accept/reject UI has nothing to call | Backend must add `POST /api/observer-edge-status` |
 | 5 | P2 | No Stripe checkout endpoint — only the webhook exists | Upgrade flow can't start a subscription | Use Stripe Payment Links short-term, or backend adds a checkout route |
 | 6 | P2 | Canvas events are still create-only in practice — `node.updated`/`node.deleted`/`edge.deleted` are accepted by the Zod schema but no pipeline re-enriches on them | Backend agents can read stale canvas state after edits/deletes/moves | Backend needs to extend real handling to the mutation event types |
-| 7 | P2 | Second active session per canvas isn't rejected by `session/start` | Two "active" sessions can coexist if the frontend convention is violated | Backend could return 409 when an active session already exists |
 
 ---
 

@@ -61,15 +61,24 @@ Cross-store reads happen in hooks/components — stores never import each other.
 ## Canvas Hydration (on canvas page mount)
 
 ```
-1. Load canvas row        → session-store (north star, title)
-2. Find active session    → none? POST /api/session/start first
+1. Load canvas row          → session-store (north star, title)
+2. Load this canvas's whole session history (session-history.ts) → resuming
+   an active session, or a brand-new canvas with no history at all, calls
+   POST /api/session/start right away (idempotent per canvas); closed
+   history with nothing active defers it instead — session-store.
+   showSessionLanding true, CanvasShell renders SessionLanding, not the
+   canvas, until a deliberate "Continue" (see SESSION-FLOWS.md)
 3. Load ALL nodes + edges for the canvas (every session — nodes belong to
-   the canvas, not the session)
+   the canvas, not the session) — always, regardless of step 2's outcome,
+   so the canvas is ready the instant SessionLanding's Continue resolves
 4. Map rows → React Flow nodes/edges → canvas-store
 5. Open the SSE stream (useGhostStream)
-6. Load carried-forward session_learnings → render as pre-loaded unresolved
-   nodes, visually distinct (see SESSION-FLOWS.md)
 ```
+
+Carried-forward `session_learnings` are NOT loaded here — only once a
+session actually starts (continueToNewSession, use-session-lifecycle.ts),
+which for a deferred canvas is after step 2's SessionLanding detour, not
+during hydration itself (see SESSION-FLOWS.md → Carry-Forward).
 
 ---
 
