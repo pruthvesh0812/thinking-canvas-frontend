@@ -501,6 +501,19 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           ◌
         </span>
       )}
+      {data.seedSource && (
+        <span
+          className="pointer-events-none absolute left-0 whitespace-nowrap text-[11.5px]"
+          style={{ top: -20, fontFamily: "var(--font-tc-hand)", color: "var(--tc-chrome-quiet)" }}
+          title={
+            data.seedSource === "carried_forward"
+              ? "Carried forward from your last session"
+              : "Accepted from the Observer's session summary"
+          }
+        >
+          {data.seedSource === "carried_forward" ? "↩ carried from last session" : "◈ from the Observer"}
+        </span>
+      )}
     </div>
   )
 }

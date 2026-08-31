@@ -1,6 +1,6 @@
 import { useSessionStore } from "@/stores/session-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
-import { PhaseToggle } from "./PhaseToggle"
+import { PhaseToggle } from "../session/PhaseToggle"
 
 // Fixed, read-only, always visible — the north star, not a form field
 // (CANVAS-RENDERING.md). original_intent has no edit affordance anywhere.

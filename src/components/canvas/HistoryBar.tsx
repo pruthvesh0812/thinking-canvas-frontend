@@ -1,15 +1,26 @@
 import { useSessionStore } from "@/stores/session-store"
 import { getSession } from "@/lib/mock-sessions"
 
+const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
+
 // A clear but calm "you are in the past" signal. Paired with the dimmed
 // earlier-session nodes and the total absence of live controls, this is what
 // makes the historical view unmistakably not a second editable canvas.
 export function HistoryBar() {
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const returnToLive = useSessionStore((s) => s.returnToLive)
+  const pastSessions = useSessionStore((s) => s.pastSessions)
 
   if (viewedSession === null) return null
-  const session = getSession(viewedSession)
+  // Mock mode's only exercise of time-travel today is OpenThreadsRail's
+  // seeded "Past sessions" list, keyed to mock-sessions.ts's numbers — keep
+  // that path exactly as it was. A real canvas's viewedSession (set from
+  // SessionLanding or, once wired, a real OpenThreadsRail) is looked up
+  // against session-store's real pastSessions instead — MockSession and
+  // PastSessionSummary both expose the `number`/`date` fields this renders.
+  const session = USE_MOCK_PERSISTENCE
+    ? getSession(viewedSession)
+    : pastSessions.find((s) => s.number === viewedSession)
   if (!session) return null
 
   return (

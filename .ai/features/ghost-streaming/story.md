@@ -2,9 +2,30 @@
 feature: "ghost-streaming"
 type: story
 created: 2026-07-05
-status: draft
+status: ui-only-not-connected
 git_branch: "[set at implementation: feature/ghost-streaming-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+
+The rendering target is fully built — `ghost-store.ts`, `GhostContextNode.tsx`,
+`GhostQuestionNode.tsx`, `GhostEdge.tsx`, `DebounceIndicator.tsx`, the
+spawn→animate→stream→done visual sequence — but **the actual SSE consumer
+this story is named for was never built**: `src/hooks/use-ghost-stream.ts`
+and `src/hooks/use-debounce-indicator.ts` don't exist, there is no
+`EventSource` anywhere in the frontend (grep confirms), and `GET
+/api/stream/:sessionId` is never opened. Every ghost pair seen in this app
+today is scripted by `src/hooks/use-intervention-demo.ts`
+(`useGhostStore.getState().spawn(MOCK_INTERVENTION)` on a timer) driving the
+same store the real stream would — `DebounceIndicator` reads that demo
+hook's canned `InterventionPhase`, not a real debounce window. So the
+`[NODE_TYPE:]`/`[QUESTION]`/`[ARTICULATION]` marker-parsing this story's DoD
+requires (Known Gap #6) is unbuilt too — there's no raw stream text to parse
+yet. This can't move until `canvas-core`'s missing `canvas-event` notify is
+wired (the backend has nothing to react to otherwise) — build the real
+`use-ghost-stream.ts` hook right after that, reusing the existing store/
+components as the render target; the demo hook can stay for storybook-style
+manual QA of the visual sequence once the real hook exists alongside it.
 
 ## What
 The SSE consumer end to end: EventSource hook, ghost store, ghost node/edge

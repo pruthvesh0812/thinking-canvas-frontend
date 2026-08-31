@@ -2,9 +2,28 @@
 feature: "canvas-core"
 type: story
 created: 2026-07-05
-status: draft
+status: partial
 git_branch: "[set at implementation: feature/canvas-core-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+
+Everything except the backend half of write-then-notify is live: the canvas
+page renders, nodes create/edit/persist to Supabase
+(`src/hooks/use-canvas-persistence.ts`), session auto-starts on hydration
+(`src/hooks/use-canvas-hydration.ts`), and reload rehydrates the identical
+canvas including layout. **`POST /api/canvas-event` is never called anywhere
+in the frontend** — `canvasEvent` exists in `src/lib/api.ts` but has zero
+call sites (confirmed by grep). This isn't Known Gap #3 (edits/deletes have
+no event) — this is the *create* event, which this story's own DoD and
+Non-Negotiable #1 (CLAUDE.md) both require, missing entirely. Practical
+consequence: the backend never learns a node/edge was created, so nothing
+in the agent pipeline this notify is supposed to trigger can fire from real
+usage — every ghost seen in this app so far comes from the scripted local
+demo (`use-intervention-demo.ts`), not a live SSE stream (see
+`ghost-streaming` story's own audit note). Wiring this notify call is the
+single highest-leverage next task — it's also what `edge-system` and
+`ghost-streaming` are silently blocked on.
 
 ## What
 A working thinking surface: the canvas page renders, the user creates and edits

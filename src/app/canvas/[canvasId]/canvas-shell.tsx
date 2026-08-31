@@ -2,7 +2,10 @@
 
 import Link from 'next/link'
 import { Canvas } from '@/components/canvas/Canvas'
+import { SessionLanding } from '@/components/session/SessionLanding'
 import { useCanvasHydration } from '@/hooks/use-canvas-hydration'
+import { useSessionLifecycle } from '@/hooks/use-session-lifecycle'
+import { useSessionStore } from '@/stores/session-store'
 
 // Loads the real canvas addressed by the route (its nodes/edges, active
 // session, north star) before rendering the surface. Hydration also owns the
@@ -11,6 +14,13 @@ import { useCanvasHydration } from '@/hooks/use-canvas-hydration'
 // seeded demo graph in canvas-store.
 export function CanvasShell({ canvasId }: { canvasId: string }) {
   const status = useCanvasHydration(canvasId)
+  // Store state, not local — session-store.showSessionLanding is also set
+  // later by use-session-lifecycle.ts's startNewSession (Session Complete's
+  // "Done" hands off back here, same screen as reopening a closed canvas),
+  // not just by this mount's own hydration.
+  const showSessionLanding = useSessionStore((s) => s.showSessionLanding)
+  const viewSession = useSessionStore((s) => s.viewSession)
+  const { continueToNewSession } = useSessionLifecycle()
 
   if (status === 'loading') {
     return (
@@ -38,6 +48,18 @@ export function CanvasShell({ canvasId }: { canvasId: string }) {
           ← back to canvases
         </Link>
       </main>
+    )
+  }
+
+  if (showSessionLanding) {
+    return (
+      <SessionLanding
+        onContinue={continueToNewSession}
+        onViewSession={async (sessionNumber) => {
+          await continueToNewSession()
+          viewSession(sessionNumber)
+        }}
+      />
     )
   }
 

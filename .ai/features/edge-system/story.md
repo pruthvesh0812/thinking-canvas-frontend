@@ -2,9 +2,23 @@
 feature: "edge-system"
 type: story
 created: 2026-07-05
-status: draft
+status: partial
 git_branch: "[set at implementation: feature/edge-system-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+
+Human-drawable half is live: `LogicalEdge.tsx`, `QuestionEdge.tsx` (pulsing),
+`EdgeTypeSelector.tsx`, Escape-cancels-with-no-row, `both_existing` written
+(currently hardcoded `true` — `Canvas.tsx`'s `onConnect` only fires for the
+connect-two-existing-nodes gesture today, so the derivation is correct as
+far as it goes; the "create child node ⇒ false" gesture doesn't exist yet
+to need distinguishing). `DoubtEdge.tsx`/`AssociativeEdge.tsx` were never
+built — AI-drawn types still collapse to `logical` for display
+(`use-canvas-hydration.ts`'s `toHumanEdgeType`), as CANVAS-RENDERING.md's
+own comment anticipates; low priority until an AI-drawn edge actually needs
+to render. **`POST /api/canvas-event` (`edge.created`) is never called** —
+same gap as `canvas-core`'s audit note, same fix.
 
 ## What
 Typed directed edges: the four edge components, the type selector on connect,

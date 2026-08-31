@@ -2,9 +2,42 @@
 feature: "session-lifecycle"
 type: story
 created: 2026-07-05
-status: draft
-git_branch: "[set at implementation: feature/session-lifecycle-<timestamp>]"
+status: implemented
+git_branch: "claude/pending-items-order-x8zcx0"
 ---
+
+## Implementation Note (2026-08-12)
+
+North star capture and the phase toggle already existed; this pass added the
+Session Complete modal (`src/components/session/SessionCompleteModal.tsx` +
+`ObserverSuggestions.tsx` + `UnresolvedThreads.tsx`), its flow state
+(`src/stores/session-complete-store.ts`), and the orchestration hook
+(`src/hooks/use-session-lifecycle.ts`) that calls `POST /api/session/complete`,
+polls `session_learnings`, and drives carry-forward. `PhaseToggle.tsx` moved
+to `src/components/session/` (matching CLAUDE.md's repo structure) and now
+writes `sessions.current_phase` to Supabase on flip, mirroring the
+`NEXT_PUBLIC_USE_MOCK_PERSISTENCE` split used everywhere else in this repo.
+
+**Deliberate v1 simplifications, flagged rather than fudged:**
+- Screen 2's "accepted contradiction nodes with no follow-up" category isn't
+  computed — a materialized ghost doesn't retain its `ContextNodeType` on the
+  resulting canvas node today (ghost-interaction's `materializeGhost` is
+  still a stub). Only the two threads computable from `canvas-store` today
+  (unanswered question edges, empty human nodes) are extracted.
+- Screen 1's "Accept to canvas" turns an observation into a plain
+  human-owned node rather than an `owner:'ai'` one — the full anchor/per-edge
+  Observer-structure model is explicitly a later story
+  (observer-structure-ui, Known Gap #4), and there's no ghost_id/SpawnDescriptor
+  to correlate an `ai_contributions` row against for a free-text
+  `session_learnings` row.
+- `session_learnings` has no `resolved` column, so carried-forward rows
+  reload at every subsequent new-session start rather than being consumed
+  once — acceptable for v1, needs a schema column to fix properly.
+- In mock mode (`NEXT_PUBLIC_USE_MOCK_PERSISTENCE=true`) the Observer pass is
+  entirely canned (`src/lib/mock-session-complete.ts`) since there's no
+  backend to run it; unresolved-thread computation and the carry-forward
+  hand-off to a new session are real either way (no Supabase needed for
+  those two).
 
 ## What
 The session arc: north star capture on canvas creation, phase toggle, the

@@ -2,9 +2,15 @@
 feature: "project-bootstrap"
 type: story
 created: 2026-07-05
-status: draft
+status: implemented
 git_branch: "[set at implementation: feature/project-bootstrap-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+Verified against the repo: Next.js App Router, Tailwind (v4/PostCSS —
+`tailwind.config.ts` doesn't exist in v4 and isn't expected to), React Flow +
+Zustand installed, `src/lib/logger.ts`, route shells for `/`, `/canvas/new`,
+`/canvas/[canvasId]`, `/login`, `/settings` all present and building.
 
 ## What
 A running Next.js App Router skeleton with every foundation piece the later

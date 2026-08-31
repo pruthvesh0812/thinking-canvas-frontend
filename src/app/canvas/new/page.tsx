@@ -18,6 +18,7 @@ const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "t
 // while only the placeholder stays italic/gestural.
 export default function NewCanvasPage() {
   const [text, setText] = useState("")
+  const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -30,12 +31,13 @@ export default function NewCanvasPage() {
   async function begin() {
     if (!canBegin) return
     const intent = text.trim()
+    const canvasName = name.trim()
 
     // Mock mode: no Supabase — seed client state and open a throwaway id,
     // exactly as before (the canvas surface renders the typed intent and the
     // seeded demo graph is reset away).
     if (USE_MOCK_PERSISTENCE) {
-      startNewCanvas(intent)
+      startNewCanvas(intent, canvasName)
       resetCanvas()
       resetGhosts()
       router.push(`/canvas/${crypto.randomUUID()}`)
@@ -59,7 +61,7 @@ export default function NewCanvasPage() {
     const { error: insertError } = await supabase.from("canvases").insert({
       id,
       original_intent: intent,
-      title: "Untitled",
+      title: canvasName || "Untitled",
       user_id: user.id,
     })
     if (insertError) {
@@ -84,6 +86,26 @@ export default function NewCanvasPage() {
           <span style={{ fontFamily: "var(--font-tc-hand)", fontSize: 19, color: "var(--tc-chrome-faint)" }}>
             the first page
           </span>
+          {/* Ordinary, editable metadata — unlike original_intent below this
+              is never write-once and never the focal point of the page.
+              Optional: left blank, the canvas is titled "Untitled" (same
+              default the dashboard already shows). */}
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name this canvas (optional)"
+            maxLength={120}
+            className="w-full max-w-[360px] bg-transparent outline-none"
+            style={{
+              border: "none",
+              borderBottom: "1px solid #E6DFD1",
+              fontFamily: "var(--font-tc-content)",
+              fontSize: 13.5,
+              color: "var(--tc-chrome)",
+              padding: "2px 0 8px",
+              fontStyle: name.trim() ? "normal" : "italic",
+            }}
+          />
           <div className="text-[36px] font-semibold leading-[1.3]" style={{ color: "var(--tc-ink)" }}>
             What are you trying to figure out?
           </div>

@@ -2,9 +2,18 @@
 feature: "contract-layer"
 type: story
 created: 2026-07-05
-status: draft
+status: implemented
 git_branch: "[set at implementation: feature/contract-layer-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+Verified: `types/index.ts`, `src/lib/supabase.ts` (no `supabase.channel` usage
+anywhere — grep confirms), `src/lib/api.ts` exports `ApiError`, `canvasEvent`,
+`ghostStatus`, `sessionStart`, `sessionComplete`; no raw `fetch` outside
+`api.ts`. Note: `canvasEvent`/`ghostStatus` are correctly *implemented* here
+but have zero call sites elsewhere in the app — that's `canvas-core`/
+`edge-system`/`ghost-interaction`'s gap, not this layer's; the wrappers
+themselves are done and correct.
 
 ## What
 The typed seam to the outside world: mirrored contract types, the Supabase
