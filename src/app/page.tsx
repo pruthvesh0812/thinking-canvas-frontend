@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ensureAnonSession } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -42,6 +42,49 @@ export default function DashboardPage() {
       : [],
   )
   const [state, setState] = useState<LoadState>(USE_MOCK_PERSISTENCE ? "ready" : "loading")
+  // Inline rename — id of the card currently in edit mode, plus its draft
+  // text. Only one card edits at a time. menuOpenId tracks which card's "⋯"
+  // menu (Rename) is open — also only ever one at a time.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [titleDraft, setTitleDraft] = useState("")
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpenId) return
+    function onPointerDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpenId(null)
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [menuOpenId])
+
+  function startEditingTitle(canvas: CanvasCard) {
+    setTitleDraft(canvas.title)
+    setEditingId(canvas.id)
+    setMenuOpenId(null)
+    requestAnimationFrame(() => titleInputRef.current?.select())
+  }
+
+  function commitTitle(canvas: CanvasCard) {
+    setEditingId(null)
+    const next = titleDraft.trim() || "Untitled"
+    if (next === canvas.title) return
+    setCanvases((cs) => cs.map((c) => (c.id === canvas.id ? { ...c, title: next } : c)))
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[dashboard] title changed (mock — no Supabase write)", { id: canvas.id, title: next })
+      return
+    }
+    void supabase
+      .from("canvases")
+      .update({ title: next })
+      .eq("id", canvas.id)
+      .then(({ error }) => {
+        if (error) logger.warn("[dashboard] title write failed", { id: canvas.id, title: next, error })
+        else logger.info("[dashboard] title persisted", { id: canvas.id, title: next })
+      })
+  }
 
   useEffect(() => {
     if (USE_MOCK_PERSISTENCE) return
@@ -120,16 +163,87 @@ export default function DashboardPage() {
                 <Link
                   key={canvas.id}
                   href={`/canvas/${canvas.id}`}
-                  className="flex min-h-[168px] flex-col rounded-xl p-[20px_22px]"
+                  className="group relative flex min-h-[168px] flex-col rounded-xl p-[20px_22px]"
                   style={{
                     background: "var(--tc-node)",
                     border: "1px solid var(--tc-node-border)",
                     boxShadow: "0 1px 2px rgba(43,38,34,.06)",
                   }}
                 >
-                  <div className="mb-2 text-[15.5px] font-semibold" style={{ color: "var(--tc-ink)" }}>
-                    {canvas.title}
+                  <div
+                    className="absolute right-2.5 top-2.5 z-10"
+                    ref={menuOpenId === canvas.id ? menuRef : undefined}
+                    // Swallow every click in this whole area — the circle,
+                    // the popover, its padding — so none of it reaches the
+                    // card's <Link>. stopPropagation alone doesn't stop an
+                    // anchor's default "follow href" navigation; only
+                    // preventDefault does, so both are needed here.
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }}
+                  >
+                    <button
+                      type="button"
+                      title="Canvas options"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setMenuOpenId((id) => (id === canvas.id ? null : canvas.id))
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[17px] font-bold leading-none hover:bg-black/[.08]"
+                      style={{ background: "rgba(43,38,34,.05)", border: "none", color: "var(--tc-chrome)" }}
+                    >
+                      ⋮
+                    </button>
+                    {menuOpenId === canvas.id && (
+                      <div
+                        className="absolute right-0 top-[34px] min-w-[120px] rounded-lg p-1"
+                        style={{
+                          background: "var(--tc-panel)",
+                          border: "1px solid var(--tc-panel-border)",
+                          boxShadow: "0 4px 14px rgba(43,38,34,.12)",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            startEditingTitle(canvas)
+                          }}
+                          className="w-full rounded-md px-2.5 py-1.5 text-left text-[12.5px] hover:bg-black/[.045]"
+                          style={{ background: "none", border: "none", color: "var(--tc-ink)" }}
+                        >
+                          Rename
+                        </button>
+                      </div>
+                    )}
                   </div>
+                  {editingId === canvas.id ? (
+                    <input
+                      ref={titleInputRef}
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onBlur={() => commitTitle(canvas)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); commitTitle(canvas) }
+                        if (e.key === "Escape") { e.preventDefault(); setEditingId(null) }
+                      }}
+                      // The card itself is the <Link> — stop the click/mousedown
+                      // that focuses this input from also triggering navigation.
+                      onClick={(e) => e.preventDefault()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      maxLength={120}
+                      autoFocus
+                      className="mb-2 w-[calc(100%-28px)] bg-transparent text-[15.5px] font-semibold outline-none"
+                      style={{ color: "var(--tc-ink)", border: "none", borderBottom: "1px solid var(--tc-hairline-strong)" }}
+                    />
+                  ) : (
+                    <div className="mb-2 pr-6 text-[15.5px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                      {canvas.title}
+                    </div>
+                  )}
                   <div
                     className="flex-1 text-base leading-[1.35]"
                     style={{ fontFamily: "var(--font-tc-hand)", color: "#9C9284" }}

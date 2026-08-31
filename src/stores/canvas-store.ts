@@ -61,10 +61,54 @@ export interface CanvasEdge {
   synced?: boolean
 }
 
+/** Snapshot of "nothing changed yet" for the live session — node content
+ * keyed by id, edge source/target keyed by id. Compared against the live
+ * nodes/edges by hasSessionChanges() to drive CanvasFooter's "I'm done"
+ * gate. Position/width/height/bend never factor in — only count, content,
+ * and linkage (CanvasFooter.tsx). */
+export interface CanvasSessionBaseline {
+  nodeContents: Record<string, string>
+  edgeLinks: Record<string, string>
+}
+
+function snapshotGraph(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasSessionBaseline {
+  const nodeContents: Record<string, string> = {}
+  for (const n of nodes) nodeContents[n.id] = n.data.content
+  const edgeLinks: Record<string, string> = {}
+  for (const e of edges) edgeLinks[e.id] = `${e.source}::${e.target}`
+  return { nodeContents, edgeLinks }
+}
+
+/** True once the live graph has diverged from its session baseline: a node
+ * was added/removed, a node's content changed, an edge was added/removed,
+ * or an existing edge's source/target changed. Used by CanvasFooter to gate
+ * "I'm done" — no point closing out a session where nothing happened. */
+export function hasSessionChanges(nodes: CanvasNode[], edges: CanvasEdge[], baseline: CanvasSessionBaseline): boolean {
+  if (nodes.length !== Object.keys(baseline.nodeContents).length) return true
+  if (edges.length !== Object.keys(baseline.edgeLinks).length) return true
+  for (const n of nodes) {
+    if (baseline.nodeContents[n.id] !== n.data.content) return true
+  }
+  for (const e of edges) {
+    if (baseline.edgeLinks[e.id] !== `${e.source}::${e.target}`) return true
+  }
+  return false
+}
+
 interface CanvasStore {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
   highlightedNodeId: string | null
+  /** See CanvasSessionBaseline. Reset by hydrate/resetToEmpty (a fresh load
+   * has nothing changed yet) and by snapshotSessionBaseline (called once a
+   * new session actually goes live — use-session-lifecycle.ts). */
+  sessionBaseline: CanvasSessionBaseline
+  /** Re-baselines to the current graph — call exactly when a session
+   * transitions to live with its starting nodes/edges already settled
+   * (e.g. after carried-forward nodes are added), so "I'm done" starts
+   * disabled for the new session rather than inheriting the previous
+   * session's already-satisfied baseline. */
+  snapshotSessionBaseline: () => void
   updateNodePosition: (id: string, position: { x: number; y: number }) => void
   updateNodeContent: (id: string, content: string) => void
   /** Manual horizontal resize (HumanNode's left/right resize handles and
@@ -138,8 +182,15 @@ interface CanvasStore {
   addSeededNodes: (nodes: CanvasNode[]) => void
   /** Replaces the whole graph with rows loaded from Supabase
    * (use-canvas-hydration.ts). Everything passed here is already durable, so
-   * callers mark it synced:true — never re-persist a hydrated row. */
-  hydrate: (nodes: CanvasNode[], edges: CanvasEdge[]) => void
+   * callers mark it synced:true — never re-persist a hydrated row.
+   * `baseline` should exclude anything created in the session that's about
+   * to go live (use-canvas-hydration.ts filters by session_id) — otherwise
+   * a reload mid-session would re-baseline to work already done this
+   * session and wrongly re-lock "I'm done". Omit only when there's no
+   * live session yet (deferred to SessionLanding); falls back to
+   * snapshotting everything, which snapshotSessionBaseline() then
+   * replaces once a session actually starts. */
+  hydrate: (nodes: CanvasNode[], edges: CanvasEdge[], baseline?: CanvasSessionBaseline) => void
   /** North-star capture (2b) pairs this with session-store.startNewCanvas —
    * a freshly created canvas starts blank, never with the seeded demo graph. */
   resetToEmpty: () => void
@@ -169,6 +220,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   nodes: SEED_NODES,
   edges: SEED_EDGES,
   highlightedNodeId: null,
+  sessionBaseline: snapshotGraph(SEED_NODES, SEED_EDGES),
+  snapshotSessionBaseline: () => set((s) => ({ sessionBaseline: snapshotGraph(s.nodes, s.edges) })),
   updateNodePosition: (id, position) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
@@ -263,6 +316,7 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   addAiNode: (node, edge) =>
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
   addSeededNodes: (nodes) => set((s) => ({ nodes: [...s.nodes, ...nodes] })),
-  hydrate: (nodes, edges) => set({ nodes, edges, highlightedNodeId: null }),
-  resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null }),
+  hydrate: (nodes, edges, baseline) =>
+    set({ nodes, edges, highlightedNodeId: null, sessionBaseline: baseline ?? snapshotGraph(nodes, edges) }),
+  resetToEmpty: () => set({ nodes: [], edges: [], highlightedNodeId: null, sessionBaseline: snapshotGraph([], []) }),
 }))

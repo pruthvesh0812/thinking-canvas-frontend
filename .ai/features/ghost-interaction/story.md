@@ -2,9 +2,24 @@
 feature: "ghost-interaction"
 type: story
 created: 2026-07-05
-status: draft
+status: ui-only-not-connected
 git_branch: "[set at implementation: feature/ghost-interaction-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+
+`GhostControls.tsx` and `RejectionReasonSelector.tsx` exist and drive local
+accept/reject UI, but `materializeGhost` in `use-canvas-persistence.ts` is a
+logged no-op stub (confirmed at the call site) — accept never inserts the
+real `owner:'ai'` node/edge into Supabase. `ghostStatus` in `src/lib/api.ts`
+has zero call sites anywhere in the frontend (grep confirms) — `POST
+/api/ghost-status` is never fired on accept or reject. So the "AI offers,
+human decides" loop only completes visually today; nothing is durable and
+the backend's rejection-insights learning loop never receives a signal.
+Still genuinely blocked on Known Gap #1 (no thread_id/turn_index on the
+stream) for the ghost-status payload — but that gap doesn't block wiring
+`materializeGhost`'s Supabase insert, which could land independently once
+`ghost-streaming` delivers a real (non-demo) pair to accept.
 
 ## What
 The consent threshold: per-node accept/reject controls on streamed pairs, the

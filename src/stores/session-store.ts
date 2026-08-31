@@ -40,7 +40,6 @@ interface SessionStore {
   originalIntent: string
   canvasTitle: string
   sessionNumber: number | null
-  canvasPosition: string
   phase: SessionPhase
   /** null = the live session. A number puts the canvas into read-only
    * time-travel for that past session (design brief §Session History). */
@@ -59,6 +58,11 @@ interface SessionStore {
   showSessionLanding: boolean
   insightsMode: InsightsMode
   setPhase: (phase: SessionPhase) => void
+  /** Local, optimistic rename — unlike original_intent this is ordinary
+   * editable metadata (canvas card / CanvasFooter). The caller is
+   * responsible for persisting it (use-session-lifecycle.ts's
+   * persistCanvasTitle), same split as setPhase/persistPhase. */
+  setCanvasTitle: (title: string) => void
   viewSession: (sessionNumber: number) => void
   setInsightsMode: (mode: InsightsMode) => void
   returnToLive: () => void
@@ -80,8 +84,11 @@ interface SessionStore {
    * canvas has no session yet either (mirrors the real path's deferred
    * start) — the canvas surface pairs this with canvas-store.resetToEmpty()
    * so a fresh canvas never shows seeded nodes, and CanvasShell's own mount
-   * flow (continueToNewSession, mock-branched) establishes session 1. */
-  startNewCanvas: (originalIntent: string) => void
+   * flow (continueToNewSession, mock-branched) establishes session 1.
+   * `title` is the canvas name (/canvas/new's name field) — unlike
+   * original_intent it's ordinary, editable metadata, not write-once;
+   * blank/omitted falls back to "Untitled", same as the real insert path. */
+  startNewCanvas: (originalIntent: string, title?: string) => void
   /** Session Complete's "Done" (screen 3, use-session-lifecycle.ts's
    * startNewSession) — the session that was just closed is gone from
    * canvasId/sessionId's live meaning, pastSessions is the freshly
@@ -102,13 +109,13 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   originalIntent: "Why is our user retention dropping after week 2?",
   canvasTitle: "Retention",
   sessionNumber: null,
-  canvasPosition: "canvas 2 of 4",
   phase: "diverging",
   viewedSession: null,
   pastSessions: [],
   showSessionLanding: false,
   insightsMode: "sidebar",
   setPhase: (phase) => set({ phase }),
+  setCanvasTitle: (title) => set({ canvasTitle: title }),
   // Opening a past session always starts docked — the full view is
   // something the human deliberately expands into, never the default.
   viewSession: (sessionNumber) => set({ viewedSession: sessionNumber, insightsMode: "sidebar" }),
@@ -127,16 +134,15 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       insightsMode: "sidebar",
       phase: "diverging",
     }),
-  startNewCanvas: (originalIntent) =>
+  startNewCanvas: (originalIntent, title) =>
     set({
       originalIntent,
-      canvasTitle: "Untitled",
+      canvasTitle: title?.trim() || "Untitled",
       // Mock mode's canvas is immediately "live" — no hydration ever runs
       // for it (use-canvas-hydration.ts no-ops entirely under
       // NEXT_PUBLIC_USE_MOCK_PERSISTENCE), so unlike the real path there's
       // no deferred-session step to mirror; session 1 starts right here.
       sessionNumber: 1,
-      canvasPosition: "canvas 5 of 5",
       phase: "diverging",
       viewedSession: null,
       pastSessions: [],

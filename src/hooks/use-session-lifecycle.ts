@@ -80,6 +80,26 @@ export function useSessionLifecycle() {
       })
   }, [])
 
+  // Canvas rename (CanvasFooter, dashboard card) — ordinary editable
+  // metadata, unlike original_intent. Writes canvases.title straight to
+  // Supabase, same optimistic-local-then-fire-and-forget shape as
+  // persistPhase. Takes canvasId explicitly since the dashboard card calls
+  // this for a canvas that isn't the one currently loaded in session-store.
+  const persistCanvasTitle = useCallback((canvasId: string, title: string) => {
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[canvas] title changed (mock — no Supabase write)", { canvasId, title })
+      return
+    }
+    void supabase
+      .from("canvases")
+      .update({ title })
+      .eq("id", canvasId)
+      .then(({ error }) => {
+        if (error) logger.warn("[canvas] title write failed", { canvasId, title, error })
+        else logger.info("[canvas] title persisted", { canvasId, title })
+      })
+  }, [])
+
   // "I'm done" — fires session/complete (async, ack-only) and opens the
   // modal on screen 1, then polls session_learnings for what the Observer
   // queues. Mock mode has no backend to run that pass, so it plays a canned
@@ -198,6 +218,9 @@ export function useSessionLifecycle() {
       }))
       useCanvasStore.getState().addSeededNodes(carriedNodes)
       useSessionStore.getState().activateSession(crypto.randomUUID(), (sessionNumber ?? 0) + 1)
+      // Baseline the new session AFTER carried-forward nodes land — those
+      // don't count as "changed" for this session's "I'm done" gate.
+      useCanvasStore.getState().snapshotSessionBaseline()
       logger.info("[session] new session started (mock)", { carried: carriedNodes.length })
       reset()
       return
@@ -209,6 +232,9 @@ export function useSessionLifecycle() {
         .insert(carried.map((t) => ({ canvas_id: canvasId, session_id: sessionId, content: t.content, type: t.kind })))
       if (error) logger.warn("[session] failed to persist carry-forward learnings", { sessionId, error })
     }
+
+    console.log({canvasId});
+    
 
     const pastSessions = canvasId ? (await fetchSessionHistory(canvasId))?.pastSessions ?? [] : []
     useSessionStore.getState().returnToSessionLanding(pastSessions)
@@ -265,12 +291,16 @@ export function useSessionLifecycle() {
     }
 
     useSessionStore.getState().activateSession(newSessionId, newSessionNumber)
+    // Baseline the new session AFTER carried-forward nodes land — those
+    // don't count as "changed" for this session's "I'm done" gate.
+    useCanvasStore.getState().snapshotSessionBaseline()
     logger.info("[session] new session started", { newSessionId, newSessionNumber })
     useSessionCompleteStore.getState().reset()
   }, [])
 
   return {
     persistPhase,
+    persistCanvasTitle,
     beginSessionComplete,
     acceptObserverSuggestion,
     skipAllSuggestions,

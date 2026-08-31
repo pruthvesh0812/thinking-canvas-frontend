@@ -2,9 +2,25 @@
 feature: "session-selector"
 type: story
 created: 2026-08-24
-status: partially-implemented
+status: implemented
 git_branch: "claude/new-canvas-north-star-bug-taof6j"
 ---
+
+## Update (2026-08-31, third pass) — OpenThreadsRail wired, story closed
+
+`OpenThreadsRail.tsx`'s "Past sessions" section now reads real
+`session-store.pastSessions` instead of `mock-sessions.ts`'s `PAST_SESSIONS`
+— same data `SessionLanding`/`HistoryBar` already used, real dates/durations/
+`nodeCount` (the pre-aggregated `PastSessionSummary.nodeCount`, resolving
+the story's own "Risks" note in favor of the hydration-time source of
+truth rather than recomputing from live `canvas-store` nodes). The seeded
+demo's "Open threads" list (`THREADS`) is now gated behind
+`NEXT_PUBLIC_USE_MOCK_PERSISTENCE` so it no longer appears on a real canvas.
+Also added, beyond the original DoD: the past-sessions list scrolls with
+incremental reveal (3 at a time via `IntersectionObserver`) instead of
+rendering the whole history at once — a rendering optimization only, no new
+Supabase query, since `pastSessions` was already fully fetched in one round
+trip at hydration.
 
 ## Update (2026-08-24, second pass) — SessionLanding shipped; OpenThreadsRail remains
 

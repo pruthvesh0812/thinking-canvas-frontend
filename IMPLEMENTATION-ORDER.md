@@ -11,20 +11,55 @@
 Build strictly in this order. Each story's file lists its exact scope, files,
 contract impact, and definition of done.
 
-| # | Story | Delivers | Depends on | Context to load |
-|---|---|---|---|---|
-| 1 | `project-bootstrap` | Next.js skeleton, Tailwind, logger, env, route shells | — | ARCHITECTURE + CODING-STANDARDS |
-| 2 | `contract-layer` | Mirrored types, Supabase client, typed api.ts | 1 | API-CONTRACT + sync/add-api-call skills |
-| 3 | `canvas-core` | Nodes on canvas, write-then-notify loop live | 2 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
-| 4 | `edge-system` | 4 edge types, selector, routing flags, question pulse | 3 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
-| 5 | `ghost-streaming` | SSE hook, ghost store, ghosts appear + stream | 4 | CORE-CONCEPTS + GHOST-STREAMING + CANVAS-RENDERING |
-| 6 | `ghost-interaction` | Accept/reject, rejection reasons, materialization | 5 ⚠gap#1 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
-| 7 | `session-lifecycle` | North star capture, phase toggle, Session Complete, carry-forward | 6 | CORE-CONCEPTS + SESSION-FLOWS |
-| 8 | `canvas-dashboard` | Multi-canvas home, create/open flow | 7 | CORE-CONCEPTS + SESSION-FLOWS |
-| 9 | `auth` | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
-| 10 | `billing-and-tiers` | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#4 | ARCHITECTURE + API-CONTRACT |
-| 11 | `observer-structure-ui` | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#2 — **backend-blocked** | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
-| 12 | `session-selector` | Real session history browsing (replaces mock-sessions.ts UI) | 8 | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
+> **Status audited 2026-08-31** against the actual repo (not just each
+> story's own frontmatter, which had drifted — see each file's new "Audit
+> Note"). Legend: ✅ done · 🟡 partial/UI-only · ⬜ not started.
+
+| # | Story | Status | Delivers | Depends on | Context to load |
+|---|---|---|---|---|---|
+| 1 | `project-bootstrap` | ✅ done | Next.js skeleton, Tailwind, logger, env, route shells | — | ARCHITECTURE + CODING-STANDARDS |
+| 2 | `contract-layer` | ✅ done | Mirrored types, Supabase client, typed api.ts | 1 | API-CONTRACT + sync/add-api-call skills |
+| 3 | `canvas-core` | 🟡 partial — **`canvas-event` notify never called** | Nodes on canvas, write-then-notify loop live | 2 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
+| 4 | `edge-system` | 🟡 partial — same notify gap; Doubt/AssociativeEdge unbuilt (low priority) | 4 edge types, selector, routing flags, question pulse | 3 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
+| 5 | `ghost-streaming` | 🟡 UI-only — **no real SSE consumer; all ghosts are the scripted demo** | SSE hook, ghost store, ghosts appear + stream | 4 | CORE-CONCEPTS + GHOST-STREAMING + CANVAS-RENDERING |
+| 6 | `ghost-interaction` | 🟡 UI-only — accept/reject never persists or reports | Accept/reject, rejection reasons, materialization | 5 ⚠gap#1 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
+| 7 | `session-lifecycle` | ✅ done (v1 simplifications documented in-file) | North star capture, phase toggle, Session Complete, carry-forward | 6 | CORE-CONCEPTS + SESSION-FLOWS |
+| 8 | `canvas-dashboard` | ✅ done | Multi-canvas home, create/open flow | 7 | CORE-CONCEPTS + SESSION-FLOWS |
+| 9 | `auth` | 🟡 partial — anonymous sign-in only; conversion/gate/login unbuilt | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
+| 10 | `billing-and-tiers` | ⬜ not started — settings/login still stub pages | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#4 | ARCHITECTURE + API-CONTRACT |
+| 11 | `observer-structure-ui` | ⬜ not started — **backend-blocked** | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#2 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
+| 12 | `session-selector` | ✅ done (closed 2026-08-31) | Real session history browsing (replaces mock-sessions.ts UI) | 8 | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
+
+### What to pick up next
+
+The build order above is nominally 3→12, but the real blocker is narrower
+than "do the next story": **stories 3 and 4 are functionally live except for
+one missing call** — nothing in `use-canvas-persistence.ts` ever calls
+`canvasEvent` from `src/lib/api.ts` after a node/edge write succeeds
+(confirmed by grep — the wrapper exists, has zero call sites). That single
+gap is *why* story 5 has no real ghosts to show: the backend never learns
+work happened, so its agent pipeline never fires, so `ghost-streaming`'s
+`use-ghost-stream.ts`/SSE hook was never built against anything — the whole
+ghost experience today is `use-intervention-demo.ts`'s scripted timer, not
+the product.
+
+**Recommended order from here:**
+1. Wire `canvasEvent` into `use-canvas-persistence.ts`'s node-content-commit
+   and edge-create paths (small, closes `canvas-core`+`edge-system` for real).
+2. Verify against a running local backend that the agent pipeline actually
+   fires — this is the first point the *real* product loop can be observed.
+3. Build `ghost-streaming`'s actual `use-ghost-stream.ts` (EventSource on
+   `GET /api/stream/:sessionId`, spawn/chunk/done dispatch into the existing
+   `ghost-store.ts`) — the store and every ghost UI component already exist
+   as the render target; this hook is the only missing piece.
+4. Wire `ghost-interaction`'s `materializeGhost` (Supabase insert, currently
+   a logged stub) and `ghostStatus` call (currently unused) once real pairs
+   exist to accept/reject — still partly gated on Known Gap #1 for the
+   status payload, but the Supabase insert half doesn't need to wait for that.
+5. Only after that loop is real end-to-end does `auth`'s remaining half
+   (signup prompt after Session Complete, `/login`, `middleware.ts` gate) or
+   `billing-and-tiers` become worth starting — both are still genuinely
+   untouched, not next in line yet.
 
 ### Why this order
 

@@ -1,10 +1,20 @@
+import { useEffect, useRef, useState } from "react"
 import { useReactFlow } from "@xyflow/react"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useCanvasStore } from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
-import { PAST_SESSIONS } from "@/lib/mock-sessions"
 
-const THREADS = [
+const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
+
+// pastSessions is already the whole history in one round trip (fetched at
+// hydration — see session-history.ts), so "loading" a page here is just
+// revealing more of the array already in memory, not a new fetch.
+const PAST_SESSIONS_PAGE_SIZE = 3
+const PAST_SESSIONS_MAX_HEIGHT = 240
+
+// Seeded demo threads — only meaningful for the mock Retention canvas
+// (its nodes carry these exact ids). Never shown on a real canvas.
+const MOCK_THREADS = [
   { id: "t1", target: "n4", icon: "?", text: "Do referral users survive week 2 better than organic signups?", meta: "open question · unanswered" },
   { id: "t2", target: "n6", icon: "?", text: 'Question from "Week-2 usage is almost entirely solo sessions…"', meta: "open question · leads to an empty node" },
   { id: "t3", target: "n6", icon: "⊘", text: "Empty node — top right of the canvas", meta: "nothing written yet" },
@@ -22,10 +32,40 @@ export function OpenThreadsRail() {
   const nodes = useCanvasStore((s) => s.nodes)
   const setHighlightedNode = useCanvasStore((s) => s.setHighlightedNode)
   const viewSession = useSessionStore((s) => s.viewSession)
+  const pastSessions = useSessionStore((s) => s.pastSessions)
   const { setCenter } = useReactFlow()
-  // The seeded demo scenario's threads only make sense while its nodes
-  // exist — a freshly created (empty) canvas has none yet.
-  const threads = THREADS.filter((t) => nodes.some((n) => n.id === t.target))
+  // The seeded demo scenario's threads only make sense on the mock
+  // Retention canvas, and only while its nodes exist.
+  const threads = USE_MOCK_PERSISTENCE
+    ? MOCK_THREADS.filter((t) => nodes.some((n) => n.id === t.target))
+    : []
+
+  // Reveals PAST_SESSIONS_PAGE_SIZE more rows at a time as the list scrolls,
+  // instead of rendering the whole history at once.
+  const [visibleCount, setVisibleCount] = useState(PAST_SESSIONS_PAGE_SIZE)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const visibleSessions = pastSessions.slice(0, visibleCount)
+
+  // The sentinel sits on the second-to-last currently-rendered row, so the
+  // next page loads just before the human scrolls past the very bottom
+  // (e.g. with 6 loaded, reaching the 5th row loads the next 3).
+  useEffect(() => {
+    if (!pastSessionsExpanded) return
+    const root = scrollRef.current
+    const sentinel = sentinelRef.current
+    if (!root || !sentinel) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((v) => Math.min(v + PAST_SESSIONS_PAGE_SIZE, pastSessions.length))
+        }
+      },
+      { root, threshold: 0.5 },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [pastSessionsExpanded, visibleCount, pastSessions.length])
 
   function jumpTo(targetId: string) {
     const node = nodes.find((n) => n.id === targetId)
@@ -43,8 +83,12 @@ export function OpenThreadsRail() {
     viewSession(sessionNumber)
   }
 
-  function nodeCountFor(sessionNumber: number) {
-    return nodes.filter((n) => n.data.sessionNumber === sessionNumber).length
+  function handleTogglePastSessions() {
+    // Opening the section always starts back at the first page — a scroll
+    // position from a previous open shouldn't carry over. Collapsing leaves
+    // it as-is since nothing renders while closed.
+    if (!pastSessionsExpanded) setVisibleCount(PAST_SESSIONS_PAGE_SIZE)
+    togglePastSessions()
   }
 
   if (!open) {
@@ -121,7 +165,7 @@ export function OpenThreadsRail() {
       <div className="mt-auto pt-2.5" style={{ borderTop: "1px solid rgba(43,38,34,.07)" }}>
         <button
           type="button"
-          onClick={togglePastSessions}
+          onClick={handleTogglePastSessions}
           className="flex w-full items-center justify-between py-1.5 hover:opacity-70"
           style={{ background: "none", border: "none", fontFamily: "inherit" }}
         >
@@ -129,7 +173,7 @@ export function OpenThreadsRail() {
             className="text-[10px] uppercase"
             style={{ letterSpacing: ".6px", color: "var(--tc-chrome-quiet)" }}
           >
-            Past sessions · {PAST_SESSIONS.length}
+            Past sessions · {pastSessions.length}
           </span>
           <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
             {pastSessionsExpanded ? "▴" : "▾"}
@@ -137,12 +181,14 @@ export function OpenThreadsRail() {
         </button>
         {pastSessionsExpanded && (
           <div
-            className="mt-1.5 flex flex-col gap-0.5"
-            style={{ animation: "tc-fadeup .2s ease-out both" }}
+            ref={scrollRef}
+            className="mt-1.5 flex flex-col gap-0.5 overflow-y-auto"
+            style={{ animation: "tc-fadeup .2s ease-out both", maxHeight: PAST_SESSIONS_MAX_HEIGHT }}
           >
-            {PAST_SESSIONS.map((s) => (
+            {visibleSessions.map((s, i) => (
               <div
-                key={s.number}
+                key={s.id}
+                ref={i === visibleSessions.length - 2 ? sentinelRef : undefined}
                 data-testid={`past-session-${s.number}`}
                 onClick={() => openSession(s.number)}
                 className="flex cursor-pointer flex-col gap-[3px] rounded-lg px-2.5 py-2 hover:bg-black/[.04]"
@@ -152,14 +198,11 @@ export function OpenThreadsRail() {
                     Session {s.number}
                   </span>
                   <span className="text-[10.5px]" style={{ color: "var(--tc-chrome-faint)" }}>
-                    {s.shortDate}
+                    {s.date}
                   </span>
                 </div>
                 <div className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
-                  {s.durationMin} min · {nodeCountFor(s.number)} nodes
-                </div>
-                <div className="mt-px text-[11.5px] leading-[1.35]" style={{ color: "var(--tc-chrome)" }}>
-                  {s.description}
+                  {s.durationMin === null ? "unknown length" : `${s.durationMin} min`} · {s.nodeCount} nodes
                 </div>
               </div>
             ))}

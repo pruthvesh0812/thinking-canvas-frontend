@@ -2,9 +2,19 @@
 feature: "canvas-dashboard"
 type: story
 created: 2026-07-05
-status: draft
+status: implemented
 git_branch: "[set at implementation: feature/canvas-dashboard-<timestamp>]"
 ---
+
+## Audit Note (2026-08-31)
+`src/app/page.tsx` implements the grid, `[New Canvas]` → `/canvas/new`, and
+open-card → `/canvas/[canvasId]`. Deviation from plan: the card markup was
+built inline in `page.tsx` rather than as a separate `CanvasCard.tsx` —
+functionally equivalent, just not split out; only worth extracting if the
+card grows more interactive state. Since this story landed, the card also
+picked up inline rename (double-click / "⋮" menu → Rename, persisted to
+`canvases.title`) — a small addition beyond the original DoD, not tracked
+under any story file.
 
 ## What
 The multi-canvas home: list the user's canvases with title, intent excerpt and

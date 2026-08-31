@@ -6,7 +6,13 @@ import { supabase } from "@/lib/supabase"
 import { sessionStart } from "@/lib/api"
 import { fetchSessionHistory } from "@/lib/session-history"
 import { logger } from "@/lib/logger"
-import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
+import {
+  useCanvasStore,
+  type CanvasEdge,
+  type CanvasNode,
+  type CanvasSessionBaseline,
+  type HumanEdgeType,
+} from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
 
 export type HydrationStatus = "loading" | "ready" | "not-found" | "error"
@@ -123,7 +129,9 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
           .order("created_at"),
         supabase
           .from("edges")
-          .select("id, from_node_id, to_node_id, from_handle, to_handle, edge_type")
+          // session_id is needed to build the "I'm done" baseline below —
+          // never rendered, never written back.
+          .select("id, from_node_id, to_node_id, from_handle, to_handle, edge_type, session_id")
           .eq("canvas_id", canvasId),
       ])
 
@@ -168,7 +176,23 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
         synced: true,
       }))
 
-      useCanvasStore.getState().hydrate(nodes, edges)
+      // "I'm done" baseline (CanvasFooter.tsx) — only rows inherited from a
+      // PRIOR session count as "nothing changed yet". Anything already
+      // stamped with the current live session_id was created/edited in
+      // this session before this hydration ran (e.g. a mid-session
+      // reload), and must read as already-changed, not reset to baseline.
+      const baseline: CanvasSessionBaseline = {
+        nodeContents: Object.fromEntries(
+          (nodeRows ?? []).filter((r) => r.session_id !== sessionId).map((r) => [r.id, r.content ?? ""]),
+        ),
+        edgeLinks: Object.fromEntries(
+          (edgeRows ?? [])
+            .filter((r) => r.session_id !== sessionId)
+            .map((r) => [r.id, `${r.from_node_id}::${r.to_node_id}`]),
+        ),
+      }
+
+      useCanvasStore.getState().hydrate(nodes, edges, baseline)
       useSessionStore.getState().loadCanvas({
         canvasId,
         sessionId,
