@@ -10,7 +10,7 @@ import {
   type NodeProps,
   type ResizeParamsWithDirection,
 } from "@xyflow/react"
-import { useGhostStore } from "@/stores/ghost-store"
+import { useGhostStore, isHaloAnchor } from "@/stores/ghost-store"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useCanvasStore, type CanvasNodeData } from "@/stores/canvas-store"
 
@@ -19,7 +19,6 @@ export type HumanNodeData = CanvasNodeData & {
   /** Manual height from the corner resize handle. Undefined = auto-fit
    * content (the default until the user drags the corner). */
   height?: number
-  onRevealPair?: (triggerNodeId: string) => void
   /** Historical view: an earlier session's node, present as context only. */
   dimmed?: boolean
   /** Historical view: no editing, no handles, no ghost interaction. */
@@ -71,10 +70,15 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   const updateNodeWidth = useCanvasStore((s) => s.updateNodeWidth)
   const updateNodeSize = useCanvasStore((s) => s.updateNodeSize)
 
-  const pair = useGhostStore((s) => s.pairs[id])
-  const revealPair = data.onRevealPair
+  // A pending ghost pair glows every node it names as an anchor — for
+  // today's node-triggered spawns that's just the trigger node itself
+  // (behavior-identical to the old `!!pairs[id]` check, since anchorNodeIds
+  // defaults to `[trigger_node_id]`), but a future `relate`-edge trigger
+  // pulls both endpoints into the halo simultaneously — one code path,
+  // driven by ghost-store's `anchorNodeIds`.
+  const isAnchor = useGhostStore((s) => isHaloAnchor(s, id))
   const readOnly = !!data.readOnly
-  const showHalo = !readOnly && !!pair && !pair.revealed
+  const showHalo = !readOnly && isAnchor
   const highlighted = useCanvasStore((s) => s.highlightedNodeId === id)
 
   useLayoutEffect(() => {
@@ -214,7 +218,6 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
       onMouseEnter={() => {
         if (readOnly) return
         setHovered(true)
-        if (showHalo) revealPair?.(id)
       }}
       onMouseLeave={() => setHovered(false)}
       onPointerDown={onPointerDown}

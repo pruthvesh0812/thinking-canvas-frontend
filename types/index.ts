@@ -1,5 +1,12 @@
 // MIRRORED from thinking-canvas-api/types/index.ts
 // source commit: 21d9ac454915d1d6e0eb8f210b1c998150b76d12   synced: 2026-08-05
+// PARTIAL SYNC 2026-09-06: EdgeType + SpawnDescriptor's `relate`-edge fields
+// only, hand-pulled from thinking-canvas-api's working tree on branch
+// feature/node-position-persistence-2026-08-11T1200 (uncommitted at sync
+// time — no commit sha to cite). The mirror is ALSO independently stale
+// beyond this (missing EdgeHandle, Node.x/y/width/height, Edge.from_handle/
+// to_handle, all merged to the backend's main since 21d9ac4) — untouched
+// here as out of scope for the relate change; needs its own full resync.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md
 //
 // This repo does not ship zod at runtime (no `zod` dependency) — the
@@ -28,7 +35,13 @@ export type ContextNodeType =
   | 'contradiction'
   | 'appreciation'
 
-export type EdgeType = 'logical' | 'doubt' | 'question' | 'associative'
+// 'relate' is the DELIBERATE "articulate this connection" gesture — the only
+// edge type that triggers the Articulator immediately. 'logical' (and doubt /
+// associative) are silent structural edges: drawing one just rearranges the
+// canvas, absorbed into the next debounced pass, so the user isn't ambushed by
+// a ghost every time they tidy up their thinking. 'question' still fires the
+// Outer Subconscious.
+export type EdgeType = 'logical' | 'doubt' | 'question' | 'associative' | 'relate'
 
 export type DirectionMarker = 'establishes' | 'questions' | 'contradicts' | 'explores'
 
@@ -240,6 +253,16 @@ export type RejectionInsight = {
 export type SpawnDescriptor = {
   trigger_node_id: string
   session_id: string
+
+  // Set for edge-triggered spawns (Articulator via a `relate` edge); undefined
+  // for node-triggered spawns (Expander / Stress-Tester / Outer Subconscious).
+  trigger_edge_id?: string
+
+  // The canvas nodes the ghost pair visually anchors to — the frontend drives
+  // its halos off this single field. ALWAYS populated: [trigger_node_id] for a
+  // node-triggered spawn, [from_node_id, to_node_id] (source first) for a
+  // relate-triggered Articulator run.
+  anchor_node_ids: string[]
 
   context_node: {
     ghost_id: string

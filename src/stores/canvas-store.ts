@@ -5,7 +5,7 @@ import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 // The two human-drawable edge types (CORE-CONCEPTS.md) — a restriction of the
 // backend's full EdgeType; `doubt`/`associative` are AI-drawn only and never
 // offered on the pen rack.
-export type HumanEdgeType = Extract<EdgeType, "logical" | "question">
+export type HumanEdgeType = Extract<EdgeType, "logical" | "question" | "relate">
 
 export interface CanvasNodeData extends Record<string, unknown> {
   content: string
@@ -46,7 +46,12 @@ export interface CanvasEdge {
   id: string
   source: string
   target: string
-  edgeType: HumanEdgeType
+  // The full backend union, not just HumanEdgeType — an AI-materialized edge
+  // (addAiNode) can carry 'doubt'/'associative' too, which the pen rack never
+  // offers a human but the backend's SpawnDescriptor can (CANVAS-RENDERING.md's
+  // edge type table). Canvas.tsx's own rendering falls back to LogicalEdge's
+  // look for anything but 'question' until dedicated components exist.
+  edgeType: EdgeType
   sourceHandle?: string
   targetHandle?: string
   /** Absolute canvas point the edge is dragged through — the middle-dot
@@ -172,9 +177,12 @@ interface CanvasStore {
    * once; calling restoreNode per node instead would double-add an edge
    * that touched two of the restored nodes. */
   restoreNodes: (nodes: CanvasNode[], edges?: CanvasEdge[]) => void
-  /** Materializes an accepted ghost as a real owner:'ai' node + connecting
-   * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
-  addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** Materializes an accepted ghost as a real owner:'ai' node + its
+   * connecting edge(s) — the ghost→real ownership transfer
+   * (CORE-CONCEPTS.md). Usually one edge; a `relate`-triggered pair takes
+   * TWO (one per anchor node), matching the two drop-lines the ghost hung
+   * from while pending (use-canvas-persistence.ts's resolveGhostPair). */
+  addAiNode: (node: CanvasNode, edges: CanvasEdge[]) => void
   /** Bulk-appends pre-loaded, edge-less starting points — carried-forward
    * unresolved threads on a new session, or an accepted Observer suggestion
    * (use-session-lifecycle.ts). Each arrives local-only (synced:false); the
@@ -313,8 +321,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   restoreNodes: (nodes, edges = []) =>
     set((s) => ({ nodes: [...s.nodes, ...nodes], edges: [...s.edges, ...edges] })),
-  addAiNode: (node, edge) =>
-    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  addAiNode: (node, edges) =>
+    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addSeededNodes: (nodes) => set((s) => ({ nodes: [...s.nodes, ...nodes] })),
   hydrate: (nodes, edges, baseline) =>
     set({ nodes, edges, highlightedNodeId: null, sessionBaseline: baseline ?? snapshotGraph(nodes, edges) }),

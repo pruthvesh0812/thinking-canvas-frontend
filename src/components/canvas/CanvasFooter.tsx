@@ -2,7 +2,6 @@ import { useRef, useState } from "react"
 import { useReactFlow } from "@xyflow/react"
 import { hasSessionChanges, useCanvasStore } from "@/stores/canvas-store"
 import { useSessionStore } from "@/stores/session-store"
-import { useGhostStore } from "@/stores/ghost-store"
 import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
 
 const NOTHING_CHANGED_TOOLTIP =
@@ -40,15 +39,6 @@ export function CanvasFooter() {
     setCanvasTitle(next)
     if (canvasId) persistCanvasTitle(canvasId, next)
   }
-  const showRejected = useGhostStore((s) => s.showRejected)
-  const toggleShowRejected = useGhostStore((s) => s.toggleShowRejected)
-  const rejectedCount = useGhostStore((s) =>
-    Object.values(s.pairs).reduce(
-      (n, p) =>
-        n + (p.context.status === "rejected-final" ? 1 : 0) + (p.question?.status === "rejected-final" ? 1 : 0),
-      0,
-    ),
-  )
   const { screenToFlowPosition } = useReactFlow()
 
   return (
@@ -82,21 +72,11 @@ export function CanvasFooter() {
             {canvasTitle}
           </span>
         )}
-        <button
-          type="button"
-          onClick={toggleShowRejected}
-          disabled={rejectedCount === 0}
-          className="rounded-full px-[11px] py-[3px] text-[11.5px]"
-          style={{
-            color: showRejected ? "var(--tc-amber-ink-strong)" : "var(--tc-chrome)",
-            background: showRejected ? "rgba(201,144,58,.12)" : "transparent",
-            border: `1px solid ${showRejected ? "rgba(201,144,58,.4)" : "var(--tc-hairline-strong)"}`,
-            cursor: rejectedCount > 0 ? "pointer" : "default",
-            opacity: rejectedCount > 0 ? 1 : 0.5,
-          }}
-        >
-          {rejectedCount > 0 ? `${showRejected ? "hide" : "show"} rejected · ${rejectedCount}` : "no rejected yet"}
-        </button>
+        {/* "show/hide rejected" lived here — removed with the mock store's
+            per-node status (ghost-streaming rewrite). The real ghost-store
+            drops a pair the moment it's decided, so there's nothing client-
+            side left to toggle; a real "rejected" view belongs to
+            ghost-interaction, backed by ai_contributions, not this store. */}
       </div>
       <button
         type="button"

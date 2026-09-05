@@ -7,7 +7,9 @@ import type {
   SessionStartResponse,
 } from "@/types"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL!
+// Exported so use-ghost-stream.ts can build the SSE URL from the same
+// source — EventSource has no header hook to route through `post()` below.
+export const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
 // Typed error carrying enough to decide a retry/rollback strategy at the call
 // site — that decision belongs in the hook that called us, not here

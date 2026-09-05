@@ -18,21 +18,25 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
-import { useCanvasStore } from "@/stores/canvas-store"
+import { useCanvasStore, type CanvasNode } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
-import { useGhostStore } from "@/stores/ghost-store"
+import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
+import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
+import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorPosition } from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
+import { RelateAnchorNode, type RelateAnchorFlowNode } from "./nodes/RelateAnchorNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
 import { GhostQuestionNode, type GhostQuestionFlowNode } from "../ghost/GhostQuestionNode"
 import { LogicalEdge } from "./edges/LogicalEdge"
 import { QuestionEdge } from "./edges/QuestionEdge"
+import { RelateEdge } from "./edges/RelateEdge"
 import { GhostEdge, type GhostEdgeData } from "./edges/GhostEdge"
 
 import { NorthStarHeader } from "./NorthStarHeader"
@@ -50,21 +54,36 @@ const nodeTypes: NodeTypes = {
   humanNode: HumanNode,
   ghostContext: GhostContextNode,
   ghostQuestion: GhostQuestionNode,
+  relateAnchor: RelateAnchorNode,
 }
 
 const edgeTypes: EdgeTypes = {
   logicalEdge: LogicalEdge,
   questionEdge: QuestionEdge,
+  relateEdge: RelateEdge,
   ghostEdge: GhostEdge,
 }
 
-// Fixed floating offset for the one seeded ghost pair — matches
-// ThinkingCanvas.dc.html's demo layout. Real spawns will position ghosts
-// relative to their trigger node once more than one scenario exists.
-const GHOST_LAYOUT = {
-  context: { x: 470, y: 552, width: 280 },
-  question: { x: 850, y: 615, width: 250 },
+// The React Flow node id a `relate`-triggered pair's midpoint anchor uses —
+// shared by the nodes memo (plants it) and the edges memo (sources the
+// ghost's drop-line from it), so the two never drift out of sync.
+function relateAnchorId(triggerEdgeId: string): string {
+  return `relate-anchor:${triggerEdgeId}`
 }
+
+// Resolves a pair's two real endpoint nodes when it was spawned by a
+// `relate` edge — undefined for a node-triggered spawn, or (shouldn't
+// happen) if an anchor id doesn't resolve to a node currently on the
+// canvas. Shared by the nodes and edges memos below.
+function relateEndpoints(pair: GhostPairState, nodesById: Map<string, CanvasNode>): [CanvasNode, CanvasNode] | undefined {
+  if (!pair.triggerEdgeId) return undefined
+  const [a, b] = pair.anchorNodeIds
+  if (!a || !b) return undefined
+  const nodeA = nodesById.get(a)
+  const nodeB = nodesById.get(b)
+  return nodeA && nodeB ? [nodeA, nodeB] : undefined
+}
+
 
 function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
@@ -76,6 +95,11 @@ function CanvasInner() {
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
   const backdropColor = useCanvasUiStore((s) => s.backdropColor)
   const pairs = useGhostStore((s) => s.pairs)
+  const sessionId = useSessionStore((s) => s.sessionId)
+  // The one SSE connection for the whole active session — opened here (once
+  // sessionId is known) and held open for CanvasInner's lifetime; it is
+  // never reconnected per ghost (GHOST-STREAMING.md).
+  useGhostStream(sessionId)
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
@@ -143,7 +167,7 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
+  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
   // starts empty, per north-star capture's resetToEmpty()).
@@ -172,7 +196,6 @@ function CanvasInner() {
 
   const nodes = useMemo<Node[]>(() => {
     const humanNodes: HumanFlowNode[] = visibleStoreNodes.map((n) => {
-      const pair = pairs[n.id]
       return {
         id: n.id,
         type: "humanNode",
@@ -181,7 +204,6 @@ function CanvasInner() {
           ...n.data,
           width: n.width,
           height: n.height,
-          onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
           soloSelected: selectedNodeIds.size === 1 && selectedNodeIds.has(n.id),
@@ -203,12 +225,33 @@ function CanvasInner() {
     // the live canvas's affordances.
     if (isHistory) return humanNodes
 
-    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
+    const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
+    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode | RelateAnchorFlowNode)[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
+      // A `relate`-triggered Articulator pair hangs below the midpoint of
+      // its edge's two endpoints, not next to a single trigger node — and
+      // plants a purely decorative anchor node at that midpoint marking
+      // where the rest-state diamond sat. The ghost's own drop-lines (edges
+      // memo below) run from BOTH endpoints straight to the ghost card, not
+      // from this anchor — React Flow edges need a real node to source from,
+      // and "both nodes point at the ghost" is the actual spec.
+      const endpoints = relateEndpoints(pair, nodesById)
+      const pos = endpoints ? ghostPositionsFromEdge(endpoints) : ghostPositions(nodesById.get(triggerNodeId))
+      if (endpoints && pair.triggerEdgeId) {
+        ghostNodes.push({
+          id: relateAnchorId(pair.triggerEdgeId),
+          type: "relateAnchor",
+          position: relateAnchorPosition(endpoints),
+          data: { triggerNodeId },
+          draggable: false,
+          selectable: false,
+          deletable: false,
+        })
+      }
       ghostNodes.push({
         id: pair.descriptor.context_node.ghost_id,
         type: "ghostContext",
-        position: { x: GHOST_LAYOUT.context.x, y: GHOST_LAYOUT.context.y },
+        position: pos.context,
         data: { triggerNodeId },
         draggable: false,
         // Not draggable, but must stay selectable — React Flow sets
@@ -218,24 +261,24 @@ function CanvasInner() {
         selectable: true,
         // Ghosts are accept/reject only, never deletable (CANVAS-RENDERING.md).
         deletable: false,
-        style: { width: GHOST_LAYOUT.context.width },
+        style: { width: GHOST_WIDTH.context },
       })
-      if (pair.question) {
+      if (hasQuestionGhost(pair)) {
         ghostNodes.push({
-          id: pair.question.ghostId,
+          id: pair.descriptor.question_node!.ghost_id,
           type: "ghostQuestion",
-          position: { x: GHOST_LAYOUT.question.x, y: GHOST_LAYOUT.question.y },
+          position: pos.question,
           data: { triggerNodeId },
           draggable: false,
           selectable: true,
           deletable: false,
-          style: { width: GHOST_LAYOUT.question.width },
+          style: { width: GHOST_WIDTH.question },
         })
       }
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession, selectedNodeIds])
+  }, [visibleStoreNodes, pairs, isHistory, viewedSession, selectedNodeIds])
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
@@ -248,7 +291,7 @@ function CanvasInner() {
         target: e.target,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
+        type: e.edgeType === "question" ? "questionEdge" : e.edgeType === "relate" ? "relateEdge" : "logicalEdge",
         // Points at the target end — LogicalEdge/QuestionEdge already thread
         // markerEnd through to BaseEdge, this is what actually turns it on.
         markerEnd: { type: MarkerType.ArrowClosed, color: "#6A6154", width: 16, height: 16 },
@@ -259,20 +302,48 @@ function CanvasInner() {
 
     if (isHistory) return humanEdges
 
+    const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
     const ghostEdges: Edge<GhostEdgeData>[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
-      ghostEdges.push({
-        id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
-        source: triggerNodeId,
-        target: pair.descriptor.context_node.ghost_id,
-        type: "ghostEdge",
-        data: { pairKey: triggerNodeId, slot: "context" },
-      })
-      if (pair.question) {
+      // A `relate`-triggered pair hangs from BOTH endpoints, not one — the
+      // rest-state edge already runs node→diamond→node, and once a ghost
+      // spawns each endpoint gets its own drop-line straight to the ghost
+      // card (the midpoint anchor node stays purely decorative, marking
+      // where the two lines used to converge). A node-triggered spawn keeps
+      // the single line from its one trigger node.
+      const endpoints = relateEndpoints(pair, nodesById)
+      if (endpoints) {
+        const [a, b] = endpoints
+        ghostEdges.push(
+          {
+            id: `ge-${a.id}-${pair.descriptor.context_node.ghost_id}`,
+            source: a.id,
+            target: pair.descriptor.context_node.ghost_id,
+            type: "ghostEdge",
+            data: { pairKey: triggerNodeId, slot: "context" },
+          },
+          {
+            id: `ge-${b.id}-${pair.descriptor.context_node.ghost_id}`,
+            source: b.id,
+            target: pair.descriptor.context_node.ghost_id,
+            type: "ghostEdge",
+            data: { pairKey: triggerNodeId, slot: "context" },
+          },
+        )
+      } else {
         ghostEdges.push({
-          id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.question.ghostId}`,
+          id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
+          source: triggerNodeId,
+          target: pair.descriptor.context_node.ghost_id,
+          type: "ghostEdge",
+          data: { pairKey: triggerNodeId, slot: "context" },
+        })
+      }
+      if (hasQuestionGhost(pair)) {
+        ghostEdges.push({
+          id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.descriptor.question_node!.ghost_id}`,
           source: pair.descriptor.context_node.ghost_id,
-          target: pair.question.ghostId,
+          target: pair.descriptor.question_node!.ghost_id,
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "question" },
         })

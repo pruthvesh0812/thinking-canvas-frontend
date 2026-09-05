@@ -1,4 +1,3 @@
-import { useGhostStore } from "@/stores/ghost-store"
 import type { RejectionReason } from "@/types"
 
 const REASONS: { value: RejectionReason; label: string }[] = [
@@ -10,8 +9,9 @@ const REASONS: { value: RejectionReason; label: string }[] = [
 // A lightweight popover, never a modal — appears immediately after reject so
 // the disappearance and the prompt read as one event. Rejection is signal,
 // not failure: the reason feeds the backend's Rejection Insights loop
-// (GHOST-STREAMING.md).
-export function RejectionReasonSelector() {
+// (GHOST-STREAMING.md) — ghost-interaction wires `onChoose` to the actual
+// POST /api/ghost-status call; this component only collects the choice.
+export function RejectionReasonSelector({ onChoose }: { onChoose: (reason: RejectionReason) => void }) {
   return (
     <div
       className="absolute left-0 top-full z-10 mt-2 w-[190px] rounded-[10px] p-[10px]"
@@ -33,7 +33,7 @@ export function RejectionReasonSelector() {
             type="button"
             className="rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-black/5"
             style={{ color: "#5F574C", background: "none", border: "none" }}
-            onClick={() => useGhostStore.getState().chooseRejectionReason(r.value)}
+            onClick={() => onChoose(r.value)}
           >
             {r.label}
           </button>
