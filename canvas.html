@@ -1,0 +1,443 @@
+<title>ThinkingCanvas — AI Intervention UX</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --paper:#F4F5F2; --board:#FCFCF9; --ink:#21242A; --ink-soft:#656B73;
+    --line:#DDE0DA; --line-strong:#C7CBC3;
+    --amber:#DD8A34; --amber-ink:#A9640F; --amber-2:#F0A94E;
+    --amber-soft:rgba(221,138,52,.16); --amber-glow:rgba(221,138,52,.55);
+    --good:#4C8C6A; --good-soft:rgba(76,140,106,.14);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --r:14px; --dur:.55s;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#111318; --board:#181B21; --ink:#E9EAE5; --ink-soft:#8B9199;
+      --line:#2A2E36; --line-strong:#3A3F49;
+      --amber:#F0A94E; --amber-ink:#F4BE79; --amber-2:#F5B65E;
+      --amber-soft:rgba(240,169,78,.15); --amber-glow:rgba(240,169,78,.5);
+      --good:#6FBF93; --good-soft:rgba(111,191,147,.15);
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F5F2; --board:#FCFCF9; --ink:#21242A; --ink-soft:#656B73;
+    --line:#DDE0DA; --line-strong:#C7CBC3; --amber:#DD8A34; --amber-ink:#A9640F;
+    --amber-2:#F0A94E; --amber-soft:rgba(221,138,52,.16); --amber-glow:rgba(221,138,52,.55);
+    --good:#4C8C6A; --good-soft:rgba(76,140,106,.14);
+  }
+  :root[data-theme="dark"]{
+    --paper:#111318; --board:#181B21; --ink:#E9EAE5; --ink-soft:#8B9199;
+    --line:#2A2E36; --line-strong:#3A3F49; --amber:#F0A94E; --amber-ink:#F4BE79;
+    --amber-2:#F5B65E; --amber-soft:rgba(240,169,78,.15); --amber-glow:rgba(240,169,78,.5);
+    --good:#6FBF93; --good-soft:rgba(111,191,147,.15);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .wrap{max-width:1080px;margin:0 auto;padding:clamp(20px,4vw,44px) clamp(16px,4vw,32px) 56px}
+
+  /* ---- header ---- */
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--amber-ink);display:flex;align-items:center;gap:.6em;margin:0 0 14px}
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--amber);opacity:.7}
+  h1{font-size:clamp(1.7rem,4.4vw,2.6rem);line-height:1.05;letter-spacing:-.02em;margin:0 0 12px;
+    text-wrap:balance;font-weight:640}
+  .dek{max-width:60ch;color:var(--ink-soft);font-size:1.02rem;margin:0}
+  .dek b{color:var(--ink);font-weight:600}
+
+  /* ---- stage layout ---- */
+  .stage{margin-top:clamp(24px,4vw,38px);display:grid;grid-template-columns:1fr 236px;
+    gap:18px;align-items:start}
+  @media (max-width:760px){ .stage{grid-template-columns:1fr} }
+
+  /* ---- board (the canvas) ---- */
+  .board{position:relative;aspect-ratio:16/9;background:var(--board);border:1px solid var(--line);
+    border-radius:var(--r);overflow:hidden;
+    background-image:radial-gradient(var(--line) 1.1px,transparent 1.1px);
+    background-size:22px 22px;background-position:-1px -1px;
+    box-shadow:0 1px 0 rgba(0,0,0,.02),0 18px 40px -30px rgba(0,0,0,.5)}
+  .scene{position:absolute;inset:0;transition:transform var(--dur) cubic-bezier(.4,0,.2,1)}
+
+  .edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .edges .ai{opacity:0;transition:opacity var(--dur)}
+
+  .node{position:absolute;transform:translate(-50%,-50%);width:min(30%,168px);padding:13px 15px;
+    background:var(--board);border:1.5px solid var(--ink);border-radius:11px;
+    font-size:.86rem;font-weight:520;color:var(--ink);letter-spacing:-.01em;
+    box-shadow:2px 3px 0 var(--line-strong);transition:box-shadow var(--dur),border-color var(--dur)}
+  .node .tag{display:block;font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-soft);margin-bottom:5px}
+  #nA{left:20%;top:40%;transform:translate(-50%,-50%) rotate(-.5deg)}
+  #nB{left:52%;top:31%;transform:translate(-50%,-50%) rotate(.4deg)}
+
+  /* anchor halo */
+  #nB::after{content:"";position:absolute;inset:-6px;border-radius:16px;pointer-events:none;
+    opacity:0;transition:opacity var(--dur);
+    box-shadow:0 0 0 2px var(--amber),0 0 calc(22px * var(--halo,.5)) calc(6px * var(--halo,.5)) var(--amber-glow),
+      0 0 calc(60px * var(--halo,.5)) calc(14px * var(--halo,.5)) var(--amber-soft)}
+  #nB.lit::after{opacity:1;animation:bloom 2.6s ease-in-out infinite}
+  #nB.lit{border-color:var(--amber)}
+  @keyframes bloom{0%,100%{filter:brightness(1)}50%{filter:brightness(1.14)}}
+
+  /* ghost pair */
+  .ghost{position:absolute;transform:translate(-50%,-50%) scale(.9);width:min(31%,182px);
+    padding:12px 14px;border:1.5px dashed var(--amber);border-radius:11px;
+    background:var(--amber-soft);color:var(--ink);font-size:.82rem;
+    opacity:0;pointer-events:none;transition:opacity .45s,transform .45s}
+  .ghost .tag{display:block;font-family:var(--mono);font-size:.58rem;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--amber-ink);margin-bottom:5px;font-weight:600}
+  #gCtx{left:63%;top:59%}
+  #gQ{left:70%;top:83%}
+  .ghost.show{opacity:.96;transform:translate(-50%,-50%) scale(1)}
+
+  .gate{position:absolute;left:70%;top:83%;transform:translate(-50%,44px);display:flex;gap:7px;
+    opacity:0;transition:opacity .4s .12s;pointer-events:none}
+  .chip{font-family:var(--mono);font-size:.64rem;letter-spacing:.05em;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--line-strong);background:var(--board);color:var(--ink-soft);cursor:pointer}
+  .chip.accept{color:var(--good);border-color:var(--good);background:var(--good-soft)}
+  .gate.show{opacity:1;pointer-events:auto}
+
+  /* processing waveform */
+  #wave{position:absolute;left:0;right:0;bottom:0;width:100%;height:56px;opacity:0;
+    transition:opacity var(--dur)}
+
+  /* the timer */
+  .timer{position:absolute;right:16px;bottom:14px;display:flex;align-items:center;gap:11px;
+    padding:9px 12px 9px 9px;background:var(--board);border:1px solid var(--line);border-radius:40px;
+    box-shadow:0 10px 24px -14px rgba(0,0,0,.5);opacity:0;transform:translateY(6px) scale(.96);
+    transition:opacity var(--dur),transform var(--dur);transform-origin:bottom right}
+  .ring{width:38px;height:38px;flex:0 0 auto}
+  .ring circle{fill:none;stroke-width:3.4;transform:rotate(-90deg);transform-origin:50% 50%}
+  .ring .trk{stroke:var(--line)}
+  .ring .arc{stroke:var(--amber);stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:0;
+    transition:stroke-dashoffset linear}
+  .tlabel{display:flex;flex-direction:column;line-height:1.15;padding-right:4px}
+  .tlabel .k{font-family:var(--mono);font-size:.58rem;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-soft)}
+  .tlabel .v{font-family:var(--mono);font-size:.9rem;font-weight:600;font-variant-numeric:tabular-nums}
+  .tbtns{display:flex;gap:5px;margin-left:2px}
+  .tbtn{font-family:var(--mono);font-size:.64rem;border:1px solid var(--line-strong);background:transparent;
+    color:var(--ink);border-radius:16px;padding:5px 9px;cursor:pointer;white-space:nowrap}
+  .tbtn.primary{background:var(--amber);border-color:var(--amber);color:#1c140a;font-weight:600}
+  :root[data-theme="dark"] .tbtn.primary{color:#160f06}
+  @media (prefers-color-scheme:dark){ .tbtn.primary{color:#160f06} }
+
+  /* scan shimmer on judge */
+  .scan{position:absolute;inset:0;opacity:0;pointer-events:none;
+    background:linear-gradient(100deg,transparent 30%,var(--amber-soft) 50%,transparent 70%);
+    background-size:280% 100%}
+
+  /* right rail / sidebar */
+  .rail{display:flex;flex-direction:column;gap:12px}
+  .rail-h{font-family:var(--mono);font-size:.64rem;letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-soft);display:flex;align-items:center;justify-content:space-between}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
+  .rail.hot .dot{background:var(--amber);box-shadow:0 0 0 4px var(--amber-soft)}
+  .sidecard{border:1px solid var(--line);border-left:3px solid var(--line-strong);border-radius:12px;
+    padding:14px;background:var(--board);transition:border-color var(--dur),box-shadow var(--dur),transform var(--dur);opacity:.6}
+  .rail.hot .sidecard{border-color:var(--line);border-left-color:var(--amber);opacity:1;
+    box-shadow:0 14px 30px -22px var(--amber-glow);transform:translateY(-1px)}
+  .sidecard .who{font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--amber-ink);font-weight:600;margin-bottom:7px}
+  .sidecard p{margin:0 0 12px;font-size:.86rem;color:var(--ink)}
+  .sidecard .go{font-family:var(--mono);font-size:.68rem;border:1px solid var(--amber);color:var(--amber-ink);
+    background:var(--amber-soft);border-radius:18px;padding:6px 12px;cursor:pointer;width:100%}
+  .rail-note{font-size:.74rem;color:var(--ink-soft);line-height:1.45}
+
+  /* ---- readout + caption ---- */
+  .console{margin-top:16px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--board)}
+  .readout{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--line);
+    font-family:var(--mono);font-size:.8rem;color:var(--ink);background:
+      linear-gradient(var(--amber-soft),var(--amber-soft));background-blend-mode:normal}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--amber);flex:0 0 auto;box-shadow:0 0 0 4px var(--amber-soft)}
+  .readout .st{color:var(--amber-ink);font-weight:600}
+  .caption{padding:14px 16px;font-size:.96rem;color:var(--ink);min-height:3.4em}
+  .caption b{color:var(--amber-ink);font-weight:600}
+
+  /* ---- controls ---- */
+  .controls{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+  .btn{font-family:var(--sans);font-size:.86rem;font-weight:560;border:1px solid var(--line-strong);
+    background:var(--board);color:var(--ink);border-radius:22px;padding:8px 16px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:7px;transition:border-color .2s,background .2s}
+  .btn:hover{border-color:var(--amber)}
+  .btn.play{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .btn.play:hover{background:var(--amber-ink);border-color:var(--amber-ink);color:#fff}
+  .dots{display:flex;gap:7px;margin-left:auto}
+  .sd{width:9px;height:9px;border-radius:50%;border:1px solid var(--line-strong);background:transparent;
+    padding:0;cursor:pointer;transition:background .2s,border-color .2s,transform .2s}
+  .sd[aria-current="true"]{background:var(--amber);border-color:var(--amber);transform:scale(1.25)}
+
+  .toggle{display:flex;align-items:center;gap:0;border:1px solid var(--line-strong);border-radius:20px;
+    overflow:hidden;opacity:0;pointer-events:none;transition:opacity .3s;font-family:var(--mono)}
+  .toggle.on{opacity:1;pointer-events:auto}
+  .toggle span.lab{font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);
+    padding:0 9px}
+  .toggle button{font-family:var(--mono);font-size:.68rem;border:0;background:transparent;color:var(--ink-soft);
+    padding:7px 11px;cursor:pointer}
+  .toggle button[aria-pressed="true"]{background:var(--amber);color:#1c140a}
+  :root[data-theme="dark"] .toggle button[aria-pressed="true"]{color:#160f06}
+  @media (prefers-color-scheme:dark){ .toggle button[aria-pressed="true"]{color:#160f06} }
+
+  /* legend */
+  .legend{margin-top:26px;display:flex;flex-wrap:wrap;gap:16px 22px;padding-top:18px;
+    border-top:1px solid var(--line);font-size:.78rem;color:var(--ink-soft)}
+  .legend span{display:inline-flex;align-items:center;gap:8px}
+  .sw{width:26px;height:0;border-top:2px solid var(--ink);flex:0 0 auto}
+  .sw.g{border-top:2px dashed var(--amber)}
+  .sw.l{border:0;width:16px;height:16px;border-radius:50%;background:radial-gradient(var(--amber),var(--amber-soft) 70%)}
+  .foot{margin-top:22px;font-size:.75rem;color:var(--ink-soft)}
+  .foot code{font-family:var(--mono);color:var(--amber-ink);background:var(--amber-soft);padding:1px 6px;border-radius:5px}
+
+  /* ---- step-driven state (id specificity intentionally beats component rules) ---- */
+  #stg[data-step="1"] .scan{opacity:1;animation:sweep 1.3s ease-in-out}
+  @keyframes sweep{0%{background-position:140% 0}100%{background-position:-40% 0}}
+  #stg[data-step="2"] #wave{opacity:.85}
+  #stg[data-step="3"] #wave{opacity:1}
+  #stg[data-step="2"] .timer{opacity:1;transform:translateY(0) scale(1)}
+  #stg[data-step="4"] #nB.anch::after,
+  #stg[data-step="5"] #nB.anch::after,
+  #stg[data-step="6"] #nB.anch::after{opacity:0}          /* default off; .lit class drives it */
+  #stg[data-step="4"] .edges .ai.stub,
+  #stg[data-step="5"] .edges .ai{opacity:.9}
+  #stg[data-step="5"] #gCtx,#stg[data-step="5"] #gQ{opacity:.96;transform:translate(-50%,-50%) scale(1)}
+  #stg[data-step="5"] .gate{opacity:1;pointer-events:auto}
+  #stg[data-step="6"] .scene{transform:translateX(-30%)}
+  #stg[data-anchor="off"][data-step="6"] .rail{}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important}
+    .scene,.timer,.ghost,.node,.sidecard{transition:none!important}
+    #nB.lit::after{opacity:1}
+  }
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">ThinkingCanvas · interaction study</p>
+  <h1>When the AI raises its hand</h1>
+  <p class="dek">A walk through what the canvas <b>actually does</b> the moment an AI contribution is ready —
+    the timer, the “processing” line, the halo, the ghost pair. Nothing barges in: the AI arrives as
+    <b>light you can ignore</b>. Step through it, or press play.</p>
+
+  <div class="stage" id="stg" data-step="0" data-attention="subtle" data-anchor="in">
+    <div class="board">
+      <div class="scene" id="scene">
+        <svg class="edges" viewBox="0 0 160 90" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="ah" markerWidth="7" markerHeight="7" refX="5.4" refY="3.5" orient="auto">
+              <path d="M0,0 L6,3.5 L0,7 z" fill="var(--ink)"></path>
+            </marker>
+            <marker id="aha" markerWidth="7" markerHeight="7" refX="5.4" refY="3.5" orient="auto">
+              <path d="M0,0 L6,3.5 L0,7 z" fill="var(--amber)"></path>
+            </marker>
+          </defs>
+          <line x1="35" y1="35" x2="76" y2="27" stroke="var(--ink)" stroke-width="1.4"
+                vector-effect="non-scaling-stroke" marker-end="url(#ah)"></line>
+          <line class="ai stub" x1="86" y1="32" x2="99" y2="51" stroke="var(--amber)" stroke-width="1.4"
+                stroke-dasharray="3 3" vector-effect="non-scaling-stroke" marker-end="url(#aha)"></line>
+          <line class="ai" x1="105" y1="57" x2="111" y2="73" stroke="var(--amber)" stroke-width="1.4"
+                stroke-dasharray="3 3" vector-effect="non-scaling-stroke" marker-end="url(#aha)"></line>
+        </svg>
+
+        <div class="node" id="nA"><span class="tag">yours</span>New users drop off before they see value</div>
+        <div class="node anch" id="nB" tabindex="0"><span class="tag">yours · focus</span>Cut the setup wizard to one screen</div>
+
+        <div class="ghost" id="gCtx"><span class="tag">ghost · reframe</span>Not fewer steps — you’re moving the first “it works” moment earlier.</div>
+        <div class="ghost" id="gQ"><span class="tag">ghost · question</span>What’s the one action where a new user first feels it click?</div>
+        <div class="gate" id="gate">
+          <button class="chip accept" type="button">✓ accept</button>
+          <button class="chip" type="button">✕ reject</button>
+        </div>
+
+        <canvas id="wave" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="scan" aria-hidden="true"></div>
+
+      <div class="timer" role="group" aria-label="Processing timer">
+        <svg class="ring" viewBox="0 0 36 36"><circle class="trk" cx="18" cy="18" r="15.9"></circle>
+          <circle class="arc" id="arc" cx="18" cy="18" r="15.9" pathLength="100"></circle></svg>
+        <div class="tlabel"><span class="k">preparing</span><span class="v" id="tsec">0:10</span></div>
+        <div class="tbtns">
+          <button class="tbtn" id="pauseBtn" type="button">⏸ pause</button>
+          <button class="tbtn primary" id="nowBtn" type="button">process now</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail" id="rail">
+      <div class="rail-h"><span>Sidebar</span><span class="dot" aria-hidden="true"></span></div>
+      <div class="sidecard" id="sidecard">
+        <div class="who">Expander · waiting</div>
+        <p>A sharper angle on “Cut the setup wizard” — worth a look when you’re free.</p>
+        <button class="go" id="goBtn" type="button">Show me on the canvas →</button>
+      </div>
+      <p class="rail-note">When the node is scrolled off-screen, a halo is wasted — the offer becomes this quiet card instead.</p>
+    </aside>
+  </div>
+
+  <div class="console">
+    <div class="readout"><span class="pulse" id="pulse"></span><span id="readout"><span class="st">idle</span> · you’re working — backend quiet</span></div>
+    <p class="caption" id="caption"></p>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="prev" type="button">← back</button>
+    <button class="btn play" id="play" type="button">▶ play</button>
+    <button class="btn" id="next" type="button">next →</button>
+    <div class="toggle" id="attnToggle">
+      <span class="lab">attention</span>
+      <button type="button" data-a="waiting" aria-pressed="false">waiting</button>
+      <button type="button" data-a="subtle" aria-pressed="true">thinking</button>
+    </div>
+    <div class="dots" id="dots" role="tablist" aria-label="Steps"></div>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw"></i> solid = your node</span>
+    <span><i class="sw g"></i> dashed = ghost (pending)</span>
+    <span><i class="sw l"></i> amber light = AI presence</span>
+  </div>
+  <p class="foot">Mirrors the backend flow in <code>DESIGN.md §2</code>: trigger ruleset → judge (mature?) → <code>waiting</code> → timer → generate → show. Content is only generated after the timer lapses or you approve.</p>
+</div>
+
+<script>
+(function(){
+  const stg=document.getElementById('stg'), reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const readout=document.getElementById('readout'), caption=document.getElementById('caption');
+  const arc=document.getElementById('arc'), tsec=document.getElementById('tsec');
+  const nB=document.getElementById('nB'), rail=document.getElementById('rail'), pulse=document.getElementById('pulse');
+  const dotsWrap=document.getElementById('dots'), attnToggle=document.getElementById('attnToggle');
+
+  const S=[
+    {r:'<span class="st">idle</span> · you’re working — backend quiet',
+     c:'You’re mid-thought. The backend only <b>reads</b> the canvas from the database — it never pushes anything onto it uninvited.'},
+    {r:'<span class="st">trigger ✓</span> · judge ▸ <b>mature</b> — route: expander',
+     c:'You pause. A lightweight rule fires and the <b>judge</b> reads the whole canvas: is there something genuinely worth saying, and exactly where? Here — yes, on “Cut the setup wizard.”'},
+    {r:'<span class="st">waiting</span> ▸ pipeline parked · 0 tokens · <span id="cd">0:10</span>',
+     c:'Only now does a soft <b>timer</b> appear, with the “processing” line along the floor. Nothing is generated yet — this is your window to defer, wave it through, or ignore it.'},
+    {r:'<span class="st">generate</span> ▸ expander streaming…',
+     c:'You let it run (or hit <b>Process now</b>). The chosen agent generates — still nothing lands on your canvas.'},
+    {r:'<span class="st">show</span> ▸ glow-first · directness: <b id="dir">SUBTLE</b> · in-view',
+     c:'The result arrives as <b>light</b>, not a wall of text — a halo on the node. Softer while you’re thinking, brighter when you’re clearly waiting.'},
+    {r:'<span class="st">reveal</span> ▸ context → question · your call',
+     c:'Hover the glow and the pair unfolds — a <b>reframe</b>, then a <b>question</b>. Accept or reject is the moment it becomes yours.'},
+    {r:'<span class="st">show</span> ▸ anchor off-screen → <b>sidebar card</b>',
+     c:'If the node is scrolled off-screen, a halo would be wasted — so it becomes a quiet <b>sidebar card</b>. Click it and the canvas glides over to the node.'}
+  ];
+  const N=S.length; let step=0, playing=false, playT=null, cdT=null;
+
+  // dots
+  for(let i=0;i<N;i++){const b=document.createElement('button');b.className='sd';b.type='button';
+    b.setAttribute('role','tab');b.setAttribute('aria-label','Step '+(i+1));
+    b.addEventListener('click',()=>{stop();go(i);});dotsWrap.appendChild(b);}
+  const dots=[...dotsWrap.children];
+
+  function setLit(on){ nB.classList.toggle('lit', on); }
+  function railHot(on){ rail.classList.toggle('hot', on); }
+
+  function armTimer(){
+    // drain the ring + countdown over ~4.6s; auto-advance in play mode
+    arc.style.transition='none'; arc.style.strokeDashoffset='0';
+    tsec.textContent='0:10';
+    void arc.getBoundingClientRect();
+    const dur = reduce?0:4600;
+    arc.style.transition='stroke-dashoffset '+dur+'ms linear';
+    requestAnimationFrame(()=>{ arc.style.strokeDashoffset='-100'; });
+    let left=10; clearInterval(cdT);
+    const cd=document.getElementById('cd');
+    cdT=setInterval(()=>{ left--; const t=Math.max(0,left); const s=t+ (t===1?'':''); const lbl='0:'+String(t).padStart(2,'0');
+      tsec.textContent=lbl; if(cd)cd.textContent=lbl; if(t<=0){clearInterval(cdT);} }, dur/10||1);
+    if(playing){ clearTimeout(playT); playT=setTimeout(()=>go(3), dur+250); }
+  }
+
+  function go(n){
+    step=(n+N)%N; stg.dataset.step=step;
+    readout.innerHTML=S[step].r; caption.innerHTML=S[step].c;
+    dots.forEach((d,i)=>d.setAttribute('aria-current', i===step?'true':'false'));
+    // presence
+    setLit(step>=4 && stg.dataset.anchor==='in' && step!==6 ? true : (step===6?false:step>=4));
+    if(step===6){ setLit(false); }
+    railHot(step===6);
+    attnToggle.classList.toggle('on', step===4||step===5);
+    pulse.style.opacity = (step>=1&&step<=3)?'1':'.28';
+    // ghost + gate handled by CSS; reveal also on hover for step 4
+    clearInterval(cdT);
+    if(step===2){ armTimer(); }
+    else { arc.style.transition='none'; arc.style.strokeDashoffset='0'; }
+    if(step===6){ stg.dataset.anchor='off'; } else { stg.dataset.anchor='in'; }
+  }
+
+  // hover reveal on the anchor during show/reveal
+  nB.addEventListener('mouseenter',()=>{ if(step===4){ document.getElementById('gCtx').classList.add('show');
+    document.getElementById('gQ').classList.add('show'); document.getElementById('gate').classList.add('show'); }});
+  nB.addEventListener('mouseleave',()=>{ if(step===4){ document.getElementById('gCtx').classList.remove('show');
+    document.getElementById('gQ').classList.remove('show'); document.getElementById('gate').classList.remove('show'); }});
+
+  // controls
+  function stop(){ playing=false; clearTimeout(playT); document.getElementById('play').textContent='▶ play'; }
+  function advance(){ if(step>=N-1){ stop(); return; } if(step===2){ return; } go(step+1);
+    if(playing && step!==2){ playT=setTimeout(advance, step===5?3600:2900); } }
+  document.getElementById('next').addEventListener('click',()=>{stop();go(step+1);});
+  document.getElementById('prev').addEventListener('click',()=>{stop();go(step-1);});
+  document.getElementById('play').addEventListener('click',function(){
+    if(playing){ stop(); return; }
+    playing=true; this.textContent='⏸ pause'; if(step>=N-1) go(0); else advance();
+    if(step!==2 && playing){ playT=setTimeout(advance, 2600); }
+  });
+  document.getElementById('nowBtn').addEventListener('click',()=>{clearInterval(cdT);clearTimeout(playT);go(3);
+    if(playing){ playT=setTimeout(advance,2600);} });
+  document.getElementById('pauseBtn').addEventListener('click',function(){
+    arc.style.transition='none'; clearInterval(cdT); clearTimeout(playT);
+    this.textContent = this.textContent.startsWith('⏸')?'▶ resume':'⏸ pause';
+    caption.innerHTML='Timer <b>paused</b>. Deferring costs nothing and it’s not a rejection — it just tells the system you’re busy, so it eases off next time.';
+  });
+  document.getElementById('goBtn').addEventListener('click',()=>{ stg.dataset.anchor='in'; go(4);
+    setTimeout(()=>{ nB.dispatchEvent(new Event('mouseenter')); },500); });
+
+  attnToggle.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    const a=b.dataset.a; stg.dataset.attention=a;
+    nB.style.setProperty('--halo', a==='waiting'?'1':'.5');
+    attnToggle.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x===b?'true':'false'));
+    const dir=document.getElementById('dir'); if(dir) dir.textContent = a==='waiting'?'DIRECT':'SUBTLE';
+    const cd=document.getElementById('cd');
+  }));
+
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'){stop();go(step+1);} if(e.key==='ArrowLeft'){stop();go(step-1);}
+  });
+
+  // ---- waveform ----
+  const cv=document.getElementById('wave'), cx=cv.getContext('2d'); let ph=0;
+  function size(){ const r=cv.getBoundingClientRect(), dpr=Math.min(2,devicePixelRatio||1);
+    cv.width=r.width*dpr; cv.height=r.height*dpr; cx.setTransform(dpr,0,0,dpr,0,0); }
+  function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function wave(){
+    const r=cv.getBoundingClientRect(), w=r.width, h=r.height, mid=h*0.62;
+    cx.clearRect(0,0,w,h);
+    const active = (stg.dataset.step==='2'||stg.dataset.step==='3');
+    const amp = stg.dataset.step==='3'? h*0.26 : active? h*0.14 : h*0.03;
+    const amb=css('--amber');
+    cx.beginPath();
+    for(let x=0;x<=w;x+=3){
+      const k=x/w;
+      const y=mid + Math.sin(k*13+ph)*amp*Math.sin(k*Math.PI) + Math.sin(k*27-ph*1.6)*amp*0.35*Math.sin(k*Math.PI);
+      x===0?cx.moveTo(x,y):cx.lineTo(x,y);
+    }
+    const grad=cx.createLinearGradient(0,0,w,0);
+    grad.addColorStop(0,'transparent'); grad.addColorStop(.5,amb); grad.addColorStop(1,'transparent');
+    cx.strokeStyle=grad; cx.lineWidth=1.6; cx.globalAlpha=active?1:.5; cx.stroke();
+    // soft fill under
+    cx.lineTo(w,h); cx.lineTo(0,h); cx.closePath();
+    cx.globalAlpha=active?.10:.03; cx.fillStyle=amb; cx.fill(); cx.globalAlpha=1;
+    if(!reduce) ph+=active?0.05:0.012;
+  }
+  function loop(){ wave(); requestAnimationFrame(loop); }
+  const ro=new ResizeObserver(size); ro.observe(cv); size();
+  if(reduce){ wave(); } else loop();
+
+  nB.style.setProperty('--halo','.5');
+  go(0);
+})();
+</script>
