@@ -41,6 +41,28 @@ export function relateAnchorPosition(endpoints: [NodeShape, NodeShape]): { x: nu
   return { x, y }
 }
 
+// A `relate`-triggered pair's two drop-lines replace the original relate
+// edge outright (it's hidden the moment the pair spawns, and deleted for
+// good once the pair is accepted — Canvas.tsx / use-canvas-persistence.ts),
+// so the replacement lines must leave each anchor node from the exact same
+// side the relate edge did, or the swap reads as a jump. The relate edge's
+// own handle ids are direction-specific ("<side>-source" on its source node,
+// "<side>-target" on its target node); a ghost drop-line is always a SOURCE
+// edge out of the anchor (anchor -> ghost), so a target-side anchor needs
+// its side re-expressed as a "-source" id. Shared by both files so they
+// can't derive two different sides for the same anchor.
+export function relateAnchorSourceHandle(
+  anchorNodeId: string,
+  originalEdge: { source: string; target: string; sourceHandle?: string; targetHandle?: string } | undefined,
+): string | undefined {
+  if (!originalEdge) return undefined
+  if (anchorNodeId === originalEdge.source) return originalEdge.sourceHandle
+  if (anchorNodeId === originalEdge.target && originalEdge.targetHandle) {
+    return `${originalEdge.targetHandle.split("-")[0]}-source`
+  }
+  return undefined
+}
+
 // Edge-triggered variant for the `relate` gesture — the ghost hangs BELOW
 // the edge's midpoint (relateAnchorPosition), not next to either endpoint,
 // matching the image spec (dashed drop-line from the edge's mid-diamond to

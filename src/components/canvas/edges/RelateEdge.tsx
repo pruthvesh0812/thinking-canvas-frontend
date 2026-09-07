@@ -1,22 +1,19 @@
 import { useEffect, useRef, useState } from "react"
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react"
 import { useCanvasStore } from "@/stores/canvas-store"
-import { useGhostStore } from "@/stores/ghost-store"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 
-// Dashed line with a midpoint ◇ at rest — "how are these two related?" Once
-// a pair is pending on this edge (triggerEdgeId matches this edge's id),
-// this component's OWN diamond hides: Canvas.tsx plants a RelateAnchorNode
-// at the edge's geometric midpoint instead, rendering a larger solid amber
-// diamond there and giving the ghost's drop-line an actual node to connect
-// FROM at that exact point (both endpoint nodes also halo, via ghost-store's
-// anchorNodeIds). Splitting it this way keeps the ghost card, its drop-line,
-// and the diamond all positioned by the one shared calculation
-// (ghost-layout.ts's relateAnchorPosition) instead of two independent ones
-// that could drift apart pixel-by-pixel.
+// Dashed line with a midpoint ◇ — "how are these two related?" Once a pair
+// spawns off this edge (triggerEdgeId matches this edge's id), Canvas.tsx
+// hides this edge outright — its two ghost drop-lines stand in for it while
+// the pair is pending, and use-canvas-persistence.ts deletes it for good on
+// acceptance — so this component only ever renders at rest and needs no
+// anchoring-specific look of its own (RelateAnchorNode carries that instead,
+// planted at the edge's would-be midpoint via ghost-layout.ts's
+// relateAnchorPosition).
 //
 // Click-to-reveal delete + drag-to-bend affordances are shared with
 // LogicalEdge/QuestionEdge — mounted once the invisible hit-path is
@@ -38,15 +35,6 @@ export function RelateEdge({
   const { requestEdgeDelete, persistEdgeBend } = useCanvasPersistence()
   const updateEdgeBend = useCanvasStore((s) => s.updateEdgeBend)
   const bend = useCanvasStore((s) => s.edges.find((e) => e.id === id)?.bend)
-  // True when some pending pair is anchored to this edge — the diamond
-  // fills solid amber and grows. Selector returns a primitive so
-  // shallow-compare settles without a wrapping object.
-  const anchoring = useGhostStore((s) => {
-    for (const pair of Object.values(s.pairs)) {
-      if (pair.triggerEdgeId === id) return true
-    }
-    return false
-  })
   const [defaultPath, defaultLabelX, defaultLabelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -120,40 +108,29 @@ export function RelateEdge({
         </>
       )}
       <EdgeLabelRenderer>
-        {/* While anchoring a pending pair, Canvas.tsx plants a
-            RelateAnchorNode at the edge's geometric midpoint (ghost-layout's
-            relateAnchorPosition) and the ghost's drop-line connects FROM it
-            — that node renders the solid diamond instead, positioned by the
-            same calculation the ghost card itself uses. Rendering both here
-            AND there would double up (and the two midpoints aren't
-            guaranteed pixel-identical: this one is React Flow's bezier
-            path midpoint, that one is the simple node-center average), so
-            this edge's own diamond only shows at rest. */}
-        {!anchoring && (
+        <div
+          className="nodrag nopan absolute"
+          style={{
+            // Rotated square — reads as ◇ / ◆. The wrapper doesn't rotate
+            // (kept axis-aligned for the box shadow to feel right); the
+            // inner shape does.
+            transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            width: diamondSize,
+            height: diamondSize,
+            pointerEvents: "none",
+          }}
+        >
           <div
-            className="nodrag nopan absolute"
             style={{
-              // Rotated square — reads as ◇ / ◆. The wrapper doesn't rotate
-              // (kept axis-aligned for the box shadow to feel right); the
-              // inner shape does.
-              transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
-              width: diamondSize,
-              height: diamondSize,
-              pointerEvents: "none",
+              width: "100%",
+              height: "100%",
+              transform: "rotate(45deg)",
+              background: diamondFill,
+              border: `1.2px solid ${diamondStroke}`,
+              transition: "background .32s ease, border-color .32s ease",
             }}
-          >
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                transform: "rotate(45deg)",
-                background: diamondFill,
-                border: `1.2px solid ${diamondStroke}`,
-                transition: "background .32s ease, border-color .32s ease",
-              }}
-            />
-          </div>
-        )}
+          />
+        </div>
       </EdgeLabelRenderer>
     </>
   )

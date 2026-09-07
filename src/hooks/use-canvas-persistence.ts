@@ -4,7 +4,7 @@ import { useGhostStore, hasQuestionGhost, type GhostPairSlot, type GhostPairStat
 import { useSessionStore } from "@/stores/session-store"
 import { supabase } from "@/lib/supabase"
 import { canvasEvent, ghostStatus } from "@/lib/api"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge } from "@/lib/ghost-layout"
+import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
 import type { EdgeType, RejectionReason } from "@/types"
 
@@ -135,6 +135,13 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
     ? ghostPositionsFromEdge([relateEndpoints[0], relateEndpoints[1]])
     : ghostPositions(nodes.find((n) => n.id === triggerNodeId))
 
+  // The relate edge this pair replaced — still on the canvas (Canvas.tsx
+  // only hides it while pending, never deletes it up front) so its handle
+  // sides are still readable here. Looked up before the delete below.
+  const originalRelateEdge = pair.triggerEdgeId
+    ? useCanvasStore.getState().edges.find((e) => e.id === pair.triggerEdgeId)
+    : undefined
+
   // While pending, a `relate` pair's ghost hangs from BOTH endpoints — one
   // drop-line each (Canvas.tsx's edges memo). The descriptor names only one
   // edge (context_edge.from is the trigger node, i.e. one endpoint), so
@@ -142,8 +149,14 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   // the accepted node would land wired to a single node. Persist one real
   // edge per anchor instead, so the settled graph keeps the shape the ghost
   // promised. Node-triggered spawns are unaffected — one anchor, one edge.
+  // Each carries the same handle its ghost drop-line used, so the two real
+  // edges leave from the exact side the replaced relate edge did.
   const contextEdges = relateEndpoints
-    ? pair.anchorNodeIds.map((from) => ({ ...pair.descriptor.context_edge, from }))
+    ? pair.anchorNodeIds.map((from) => ({
+        ...pair.descriptor.context_edge,
+        from,
+        sourceHandle: relateAnchorSourceHandle(from, originalRelateEdge),
+      }))
     : [pair.descriptor.context_edge]
 
   // 1. Insert accepted node(s) + connecting edge(s), owner:'ai', reusing
@@ -162,6 +175,12 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
       contextEdges,
       ids,
     )
+    // The two edges just materialized above permanently replace the relate
+    // edge this pair spawned from — Canvas.tsx only hid it while pending, so
+    // delete it for real now rather than leaving a stale row behind it.
+    if (relateEndpoints && originalRelateEdge) {
+      await deleteRelateEdge(originalRelateEdge)
+    }
   }
   if (questionAccepted && pair.descriptor.question_edge) {
     // question_edge.from is the CONTEXT ghost id — if context was rejected
@@ -233,7 +252,7 @@ async function materializeAcceptedGhost(
   content: string,
   position: { x: number; y: number },
   width: number,
-  edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType }>,
+  edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
   ids: { canvasId: string; sessionId: string },
 ) {
   const { error: nodeError } = await supabase.from("nodes").insert({
@@ -258,7 +277,10 @@ async function materializeAcceptedGhost(
     session_id: ids.sessionId,
     from_node_id: spec.from,
     to_node_id: spec.to,
-    from_handle: null,
+    // Same bare-side-only convention as writeEdge's handleSide — a `relate`
+    // pair's specs carry the replaced edge's matching side (contextEdges
+    // above); a node-triggered spawn never sets one.
+    from_handle: handleSide(spec.sourceHandle),
     to_handle: null,
     edge_type: spec.edge_type,
     both_existing: false,
@@ -283,11 +305,14 @@ async function materializeAcceptedGhost(
         synced: true,
       },
     },
-    edgeRows.map((row) => ({
+    edgeRows.map((row, i) => ({
       id: row.id,
       source: row.from_node_id,
       target: row.to_node_id,
       edgeType: row.edge_type,
+      // The compound "<side>-source" id, not the DB's bare-side row above —
+      // React Flow needs it to actually connect at that handle.
+      sourceHandle: edgeSpecs[i].sourceHandle,
       synced: true,
     })),
   )
@@ -295,6 +320,23 @@ async function materializeAcceptedGhost(
     ghostId,
     edgeIds: edgeRows.map((row) => row.id),
   })
+}
+
+// Permanently removes the relate edge a just-accepted pair replaced — no
+// undo window (unlike requestEdgeDelete's human-hover path): the two real
+// edges materialized above already stand in its place, so leaving it around
+// would double up the connection it depicted. A failed delete logs and
+// leaves the row rather than rolling anything materialized back — same
+// asymmetric-failure tradeoff the rest of ghost-interaction accepts.
+async function deleteRelateEdge(edge: CanvasEdge) {
+  useCanvasStore.getState().removeEdge(edge.id)
+  if (!edge.synced) return
+  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
+  if (error) {
+    logger.warn("[ghost-interaction] replaced relate edge delete failed", { edgeId: edge.id, error })
+    return
+  }
+  logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
 }
 
 // The write-then-notify loop (STATE-MANAGEMENT.md): every user node/edge

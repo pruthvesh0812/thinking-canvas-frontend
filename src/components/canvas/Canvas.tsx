@@ -27,7 +27,7 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorPosition } from "@/lib/ghost-layout"
+import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorPosition, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
@@ -282,9 +282,18 @@ function CanvasInner() {
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
+    // A `relate` edge with a pending pair anchored to it is being replaced,
+    // not just annotated — its two ghost drop-lines (below) stand in for it
+    // for as long as the pair is pending, so the original edge is hidden
+    // outright rather than rendered alongside them. Rejecting the pair
+    // removes it from `pairs` with the edge itself untouched, so it simply
+    // reappears; accepting deletes it for good (use-canvas-persistence.ts).
+    const anchoredEdgeIds = isHistory
+      ? new Set<string>()
+      : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
     const humanEdges: Edge[] = storeEdges
       // An edge whose other end doesn't exist yet would dangle in the past.
-      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
+      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target) && !anchoredEdgeIds.has(e.id))
       .map((e) => ({
         id: e.id,
         source: e.source,
@@ -314,10 +323,14 @@ function CanvasInner() {
       const endpoints = relateEndpoints(pair, nodesById)
       if (endpoints) {
         const [a, b] = endpoints
+        // Same side each anchor's now-hidden relate edge left from — the
+        // replacement reads as a swap, not a relayout (ghost-layout.ts).
+        const originalEdge = pair.triggerEdgeId ? storeEdges.find((e) => e.id === pair.triggerEdgeId) : undefined
         ghostEdges.push(
           {
             id: `ge-${a.id}-${pair.descriptor.context_node.ghost_id}`,
             source: a.id,
+            sourceHandle: relateAnchorSourceHandle(a.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
@@ -325,6 +338,7 @@ function CanvasInner() {
           {
             id: `ge-${b.id}-${pair.descriptor.context_node.ghost_id}`,
             source: b.id,
+            sourceHandle: relateAnchorSourceHandle(b.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
