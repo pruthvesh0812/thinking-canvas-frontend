@@ -94,6 +94,8 @@ function CanvasInner() {
   const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
   const backdropColor = useCanvasUiStore((s) => s.backdropColor)
+  const showSetAside = useCanvasUiStore((s) => s.showSetAside)
+  const toggleShowSetAside = useCanvasUiStore((s) => s.toggleShowSetAside)
   const pairs = useGhostStore((s) => s.pairs)
   const sessionId = useSessionStore((s) => s.sessionId)
   // The one SSE connection for the whole active session — opened here (once
@@ -177,9 +179,16 @@ function CanvasInner() {
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
   // yet, and showing it would misrepresent the trail (design brief).
+  // Set-aside (soft-archived) AI nodes are hidden on the LIVE canvas until
+  // the "show set aside" toggle is on. History deliberately ignores set-aside
+  // entirely — a past session shows what stood then, with no imprint of a
+  // later set-aside (the node renders normally in history).
   const visibleStoreNodes = useMemo(
-    () => (isHistory ? storeNodes.filter((n) => n.data.sessionNumber <= viewedSession) : storeNodes),
-    [storeNodes, isHistory, viewedSession],
+    () =>
+      isHistory
+        ? storeNodes.filter((n) => n.data.sessionNumber <= viewedSession)
+        : storeNodes.filter((n) => showSetAside || !n.data.setAsideAt),
+    [storeNodes, isHistory, viewedSession, showSetAside],
   )
 
   // Selecting a past session shows the whole canvas as it stood then — so
@@ -207,6 +216,10 @@ function CanvasInner() {
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
           soloSelected: selectedNodeIds.size === 1 && selectedNodeIds.has(n.id),
+          // Styling/affordance flag — a node reads as "set aside" only on the
+          // live canvas (it's here at all in that case because the toggle is
+          // on). In history it renders normally, so this stays false there.
+          setAside: !isHistory && !!n.data.setAsideAt,
         },
         // Draggable is controlled at the ReactFlow level (nodesDraggable
         // below) so Cmd/Ctrl held can disable it globally — that's how a
@@ -517,6 +530,37 @@ function CanvasInner() {
           )}
         </ReactFlow>
         {!isHistory && <BackdropSwitcher />}
+        {/* Set-aside toggle — only surfaces once at least one AI node has been
+            set aside. Off by default, so set-aside nodes stay out of the way;
+            flipping it reveals them (muted, labelled) so they can be brought
+            back. */}
+        {!isHistory &&
+          (() => {
+            const setAsideCount = storeNodes.filter((n) => n.data.setAsideAt).length
+            if (setAsideCount === 0) return null
+            return (
+              <button
+                type="button"
+                onClick={toggleShowSetAside}
+                aria-pressed={showSetAside}
+                className="absolute right-4 top-4 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px]"
+                style={{
+                  zIndex: 5,
+                  border: "1px solid var(--tc-node-border)",
+                  background: showSetAside ? "var(--tc-ink)" : "var(--tc-node)",
+                  color: showSetAside ? "#f5f1e8" : "var(--tc-chrome)",
+                  boxShadow: "0 1px 3px rgba(43,38,34,.12)",
+                  cursor: "pointer",
+                  transition: "background .15s ease, color .15s ease",
+                }}
+              >
+                <span aria-hidden>{showSetAside ? "◉" : "◌"}</span>
+                <span>
+                  {showSetAside ? "Hide" : "Show"} set aside ({setAsideCount})
+                </span>
+              </button>
+            )
+          })()}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
             <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />

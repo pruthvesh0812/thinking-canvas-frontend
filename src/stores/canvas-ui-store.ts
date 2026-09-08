@@ -48,6 +48,12 @@ interface CanvasUiStore {
    * color". One tint for all three modes, not one per mode. */
   backdropColor: string | null
   setBackdropColor: (color: string | null) => void
+  /** Whether set-aside (soft-archived) AI nodes are shown on the live
+   * canvas. Default false — set-aside nodes are hidden until the user opts
+   * to see them (Canvas.tsx). View-only, never persisted; resets on reload
+   * like every toggle here. */
+  showSetAside: boolean
+  toggleShowSetAside: () => void
 }
 
 export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
@@ -57,6 +63,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
   pendingDelete: null,
   canvasBackdrop: "paper",
   backdropColor: null,
+  showSetAside: false,
   setActivePen: (pen) => set({ activePen: pen }),
   toggleThreadsRail: () => set((s) => ({ threadsRailOpen: !s.threadsRailOpen })),
   setThreadsRailOpen: (open) => set({ threadsRailOpen: open }),
@@ -65,4 +72,5 @@ export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
   setPendingDelete: (pending) => set({ pendingDelete: pending }),
   setCanvasBackdrop: (backdrop) => set({ canvasBackdrop: backdrop }),
   setBackdropColor: (color) => set({ backdropColor: color }),
+  toggleShowSetAside: () => set((s) => ({ showSetAside: !s.showSetAside })),
 }))

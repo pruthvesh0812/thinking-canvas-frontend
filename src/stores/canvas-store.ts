@@ -28,6 +28,13 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * Purely a badge/visual marker — once edited, the node persists through
    * the ordinary human-node write path like any other. */
   seedSource?: "carried_forward" | "observer_suggestion"
+  /** Soft-archive ("set aside") timestamp (ISO), mirroring nodes.set_aside_at.
+   * Absent/null = active; a string = set aside at that instant. Only ever set
+   * on an owner:'ai' node — a set-aside node is preserved but removed from the
+   * live canvas and (backend-side) excluded from AI reasoning until brought
+   * back. Frontend-written: use-canvas-persistence.ts writes it to Supabase
+   * and notifies via a node.set_aside / node.restored canvas-event. */
+  setAsideAt?: string | null
 }
 
 export interface CanvasNode {
@@ -129,6 +136,14 @@ interface CanvasStore {
   /** Flips data.synced true after a node's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markNodeSynced: (id: string) => void
+  /** Marks an accepted AI node as set aside (soft-archive), stamping
+   * data.setAsideAt. Optimistic — use-canvas-persistence.ts writes
+   * set_aside_at to Supabase and notifies; a failed write rolls this back
+   * via bringNodeBack. */
+  setNodeAside: (id: string, at: string) => void
+  /** Clears a node's set-aside state (bring back) — the inverse of
+   * setNodeAside, same optimistic/rollback contract. */
+  bringNodeBack: (id: string) => void
   setHighlightedNode: (id: string | null) => void
   /** click-empty-canvas / "+ New node" — empty node in edit mode
    * (CANVAS-RENDERING.md Canvas Interactions). */
@@ -253,6 +268,14 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   markNodeSynced: (id) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
+    })),
+  setNodeAside: (id, at) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, setAsideAt: at } } : n)),
+    })),
+  bringNodeBack: (id) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, setAsideAt: null } } : n)),
     })),
   setHighlightedNode: (id) => set({ highlightedNodeId: id }),
   addNode: (position) => {

@@ -928,6 +928,84 @@ export function useCanvasPersistence() {
     // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
   }
 
+  // Set aside (soft-archive) — only ever an accepted AI node. Reversible, so
+  // there's no undo-toast window like delete has; the "show set aside" toggle
+  // + Bring back is the recovery path. Optimistic store write first, then the
+  // Supabase set_aside_at write, then notify. The backend excludes a
+  // set-aside node (and any edge touching it) from all reasoning; the notify
+  // lets it treat this like a delete for any in-flight offer.
+  function setAsideNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    // Human nodes delete (never set aside); an already-set-aside node no-ops.
+    if (!node || node.data.owner !== "ai" || node.data.setAsideAt) return
+    const at = new Date().toISOString()
+    useCanvasStore.getState().setNodeAside(nodeId, at)
+    void writeSetAside(nodeId, at)
+  }
+
+  async function writeSetAside(nodeId: string, at: string) {
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[set-aside] node set aside (mock — no Supabase write)", { nodeId })
+      return
+    }
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[set-aside] no canvas/session in context — rolling back", { nodeId })
+      useCanvasStore.getState().bringNodeBack(nodeId)
+      return
+    }
+    const { error } = await supabase.from("nodes").update({ set_aside_at: at }).eq("id", nodeId)
+    if (error) {
+      logger.warn("[set-aside] write failed, rolling back", { nodeId, error })
+      useCanvasStore.getState().bringNodeBack(nodeId)
+      return
+    }
+    void canvasEvent({
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      event_type: "node.set_aside",
+      node_id: nodeId,
+    }).catch(() => {})
+    logger.info("[set-aside] node set aside", { nodeId })
+  }
+
+  // Bring a set-aside node back into the live canvas + reasoning. Captures
+  // the prior timestamp so a failed write can restore the exact set-aside
+  // state rather than a fabricated one.
+  function restoreSetAsideNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    const prevAt = node?.data.setAsideAt
+    if (!node || !prevAt) return
+    useCanvasStore.getState().bringNodeBack(nodeId)
+    void writeRestore(nodeId, prevAt)
+  }
+
+  async function writeRestore(nodeId: string, prevAt: string) {
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[set-aside] node brought back (mock — no Supabase write)", { nodeId })
+      return
+    }
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[set-aside] no canvas/session in context — rolling back", { nodeId })
+      useCanvasStore.getState().setNodeAside(nodeId, prevAt)
+      return
+    }
+    const { error } = await supabase.from("nodes").update({ set_aside_at: null }).eq("id", nodeId)
+    if (error) {
+      logger.warn("[set-aside] restore write failed, rolling back", { nodeId, error })
+      useCanvasStore.getState().setNodeAside(nodeId, prevAt)
+      return
+    }
+    void canvasEvent({
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      event_type: "node.restored",
+      node_id: nodeId,
+    }).catch(() => {})
+    logger.info("[set-aside] node brought back", { nodeId })
+  }
+
   return {
     persistNodeContent,
     persistNodeLayout,
@@ -938,5 +1016,7 @@ export function useCanvasPersistence() {
     requestEdgeDelete,
     duplicateNode,
     decideGhost,
+    setAsideNode,
+    restoreSetAsideNode,
   }
 }
