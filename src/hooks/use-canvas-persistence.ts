@@ -167,7 +167,7 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   //    Delivery / ghost-interaction's Contract Impact).
   const contextContent = pair.articulations ? pair.articulations.join("\n\n") : pair.contextText
   if (contextAccepted) {
-    await materializeAcceptedGhost(
+    const materialized = await materializeAcceptedGhost(
       pair.descriptor.context_node.ghost_id,
       contextContent,
       positions.context,
@@ -177,8 +177,12 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
     )
     // The two edges just materialized above permanently replace the relate
     // edge this pair spawned from — Canvas.tsx only hid it while pending, so
-    // delete it for real now rather than leaving a stale row behind it.
-    if (relateEndpoints && originalRelateEdge) {
+    // delete it for real now. But ONLY if materialization actually succeeded:
+    // if the accepted node/edges failed to insert (materializeAcceptedGhost
+    // returns false after logging + rolling back), deleting the relate edge
+    // too would destroy the connection with nothing standing in for it. Leave
+    // it in place so the pair reappears and the user can retry.
+    if (materialized && relateEndpoints && originalRelateEdge) {
       await deleteRelateEdge(originalRelateEdge)
     }
   }
@@ -247,6 +251,9 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
 // rollback, same asymmetric-failure tradeoff writeEdge already accepts
 // for the human-drawn path (retryPendingEdges has no equivalent here —
 // ghost-status still fires either way, so a retry isn't wired).
+// Returns true only when the accepted node AND its edge(s) both landed —
+// the caller uses that to decide whether it's safe to delete the relate edge
+// this pair replaced (a failed materialize must leave that edge in place).
 async function materializeAcceptedGhost(
   ghostId: string,
   content: string,
@@ -254,7 +261,7 @@ async function materializeAcceptedGhost(
   width: number,
   edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
   ids: { canvasId: string; sessionId: string },
-) {
+): Promise<boolean> {
   const { error: nodeError } = await supabase.from("nodes").insert({
     id: ghostId,
     canvas_id: ids.canvasId,
@@ -268,7 +275,7 @@ async function materializeAcceptedGhost(
   })
   if (nodeError) {
     logger.warn("[ghost-interaction] accepted node insert failed", { ghostId, error: nodeError })
-    return
+    return false
   }
 
   const edgeRows = edgeSpecs.map((spec) => ({
@@ -289,7 +296,7 @@ async function materializeAcceptedGhost(
   if (edgeError) {
     logger.warn("[ghost-interaction] accepted edge insert failed, rolling back node", { ghostId, error: edgeError })
     await supabase.from("nodes").delete().eq("id", ghostId)
-    return
+    return false
   }
 
   useCanvasStore.getState().addAiNode(
@@ -320,22 +327,34 @@ async function materializeAcceptedGhost(
     ghostId,
     edgeIds: edgeRows.map((row) => row.id),
   })
+  return true
 }
 
 // Permanently removes the relate edge a just-accepted pair replaced — no
 // undo window (unlike requestEdgeDelete's human-hover path): the two real
 // edges materialized above already stand in its place, so leaving it around
-// would double up the connection it depicted. A failed delete logs and
-// leaves the row rather than rolling anything materialized back — same
-// asymmetric-failure tradeoff the rest of ghost-interaction accepts.
+// would double up the connection it depicted.
+//
+// The Supabase delete happens BEFORE the local removal, and the local removal
+// is skipped if it fails — otherwise the store and Supabase disagree: the
+// edge would be gone locally but still on the row, so a reload/hydrate would
+// resurrect it alongside its two replacements (the exact double-up this is
+// meant to prevent, and now unrecoverable). Keeping both in sync on failure
+// leaves the redundant relate edge visible so the user can hand-delete it.
 async function deleteRelateEdge(edge: CanvasEdge) {
-  useCanvasStore.getState().removeEdge(edge.id)
-  if (!edge.synced) return
-  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
-  if (error) {
-    logger.warn("[ghost-interaction] replaced relate edge delete failed", { edgeId: edge.id, error })
+  if (!edge.synced) {
+    useCanvasStore.getState().removeEdge(edge.id)
     return
   }
+  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
+  if (error) {
+    logger.warn("[ghost-interaction] replaced relate edge delete failed — leaving it on canvas", {
+      edgeId: edge.id,
+      error,
+    })
+    return
+  }
+  useCanvasStore.getState().removeEdge(edge.id)
   logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
 }
 

@@ -56,10 +56,16 @@ export function relateAnchorSourceHandle(
   originalEdge: { source: string; target: string; sourceHandle?: string; targetHandle?: string } | undefined,
 ): string | undefined {
   if (!originalEdge) return undefined
+  // Derive a handle only when the original edge fully specifies BOTH sides.
+  // Otherwise the two legs would go asymmetric — one pinned to its exact
+  // original side, the other (missing its handle) snapping to React Flow's
+  // default — which reads as the relayout this helper exists to prevent.
+  // All human-drawn relate edges set both handles (Canvas.tsx's onConnect),
+  // so this only guards a malformed/legacy row: there, both legs fall back
+  // to the default together, staying symmetric.
+  if (!originalEdge.sourceHandle || !originalEdge.targetHandle) return undefined
   if (anchorNodeId === originalEdge.source) return originalEdge.sourceHandle
-  if (anchorNodeId === originalEdge.target && originalEdge.targetHandle) {
-    return `${originalEdge.targetHandle.split("-")[0]}-source`
-  }
+  if (anchorNodeId === originalEdge.target) return `${originalEdge.targetHandle.split("-")[0]}-source`
   return undefined
 }
 
