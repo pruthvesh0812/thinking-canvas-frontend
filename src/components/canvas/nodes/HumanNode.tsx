@@ -510,7 +510,10 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           and from the AI's reasoning, reversibly. Same kebab + popover chrome
           as the human menu; a given node is human XOR ai, so the shared
           `popover` state never serves both at once. An already-set-aside node
-          (only visible while the toggle is on) offers Bring back instead. */}
+          (only reachable at all while the "show set aside" toggle is on —
+          Canvas.tsx) offers Restore instead: the toggle is visibility-only,
+          it does NOT bring a node back into AI reasoning by itself — Restore
+          (clearing set_aside_at) is the only thing that does. */}
       {!readOnly && data.owner === "ai" && (
         <div
           className="tc-node-menu nodrag absolute"
@@ -589,7 +592,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
                       className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-black/5"
                       style={{ border: "none", background: "transparent", color: "var(--tc-ink)", cursor: "pointer" }}
                     >
-                      <span>Bring back</span>
+                      <span>Restore</span>
                       <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>↩</span>
                     </button>
                   ) : (
@@ -615,8 +618,8 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
                     Set this aside?
                   </div>
                   <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
-                    It leaves the canvas and the AI stops using it for reasoning. You can bring it back anytime from “Show
-                    set aside”.
+                    It leaves the canvas and the AI stops using it for reasoning. Turn on “Show set aside” to find it
+                    again, then Restore it from its menu whenever you want the AI to consider it.
                   </div>
                   <div className="flex justify-end gap-2">
                     <button
@@ -649,30 +652,41 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           )}
         </div>
       )}
-      {/* "Set aside" chip — the label that carries the meaning so the state
-          doesn't rest on opacity alone (only shows on the live canvas via
-          data.setAside, never in history). */}
-      {data.setAside && (
-        <span
-          className="pointer-events-none absolute left-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
-          style={{
-            top: -11,
-            background: "var(--tc-ink)",
-            color: "#f5f1e8",
-            letterSpacing: ".02em",
-          }}
-        >
-          Set aside
-        </span>
-      )}
-      {data.aiMarker && (
-        <span
-          className="absolute right-2 top-1 text-xs"
-          style={{ color: "var(--tc-chrome-quiet)" }}
-          title="AI contribution — accepted"
-        >
-          ◌
-        </span>
+      {/* Identity/state chips — "AI" marks any accepted AI node forever
+          (CANVAS-RENDERING.md: a persistent marker, human vs AI stays
+          distinguishable), "Set aside" adds alongside it once that node is
+          set aside (live canvas only — never in history, matching the muted
+          styling above). Two chips, not one combined label, so each state
+          reads independently at a glance. */}
+      {(data.aiMarker || data.setAside) && (
+        <div className="pointer-events-none absolute left-0 flex gap-1" style={{ top: -11 }}>
+          {data.aiMarker && (
+            <span
+              className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+              style={{
+                background: "rgba(201,144,58,.14)",
+                border: "1px solid var(--tc-amber)",
+                color: "var(--tc-amber-ink-strong)",
+                letterSpacing: ".02em",
+              }}
+              title="AI contribution — accepted"
+            >
+              AI
+            </span>
+          )}
+          {data.setAside && (
+            <span
+              className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+              style={{
+                background: "var(--tc-ink)",
+                color: "#f5f1e8",
+                letterSpacing: ".02em",
+              }}
+            >
+              Set aside
+            </span>
+          )}
+        </div>
       )}
       {data.seedSource && (
         <span
