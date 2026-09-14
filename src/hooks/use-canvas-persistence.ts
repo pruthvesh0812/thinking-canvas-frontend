@@ -341,6 +341,24 @@ async function materializeAcceptedGhost(
 // resurrect it alongside its two replacements (the exact double-up this is
 // meant to prevent, and now unrecoverable). Keeping both in sync on failure
 // leaves the redundant relate edge visible so the user can hand-delete it.
+// Recognizes an edge as one leg of an accepted `relate` articulation, purely
+// from live graph shape (no persisted marker needed, so it holds after a
+// reload too): its target is an owner:'ai' note with EXACTLY two incoming
+// edges and no outgoing ones — the two-drop-line signature materializeAccepted
+// Ghost leaves behind. An Expander/Stress-Tester context node fails this (one
+// incoming from its trigger, plus an outgoing edge to its question node), and
+// a plain human→human relate edge fails it (target isn't AI), so neither
+// trips the prompt. Returns the note id + both leg ids, or null.
+function detectRelateArticulation(edge: CanvasEdge): { aiNodeId: string; legEdgeIds: string[] } | null {
+  const { nodes, edges } = useCanvasStore.getState()
+  const target = nodes.find((n) => n.id === edge.target)
+  if (!target || target.data.owner !== "ai") return null
+  const legsIn = edges.filter((e) => e.target === target.id)
+  const legsOut = edges.filter((e) => e.source === target.id)
+  if (legsIn.length !== 2 || legsOut.length !== 0) return null
+  return { aiNodeId: target.id, legEdgeIds: legsIn.map((e) => e.id) }
+}
+
 async function deleteRelateEdge(edge: CanvasEdge) {
   if (!edge.synced) {
     useCanvasStore.getState().removeEdge(edge.id)
@@ -873,6 +891,17 @@ export function useCanvasPersistence() {
     const edge = useCanvasStore.getState().edges.find((e) => e.id === edgeId)
     if (!edge) return
 
+    // A `relate` articulation's two legs (A→C, B→C into an AI note C) are one
+    // unit — dropping a single leg would leave C claiming a relationship it
+    // only half-connects. Detect that structurally and hand off to the
+    // Canvas-level prompt instead of a silent single-edge delete; the user
+    // picks drop-both-legs or set-the-note-aside there.
+    const relate = detectRelateArticulation(edge)
+    if (relate) {
+      useCanvasUiStore.getState().setRelateLegPrompt(relate)
+      return
+    }
+
     useCanvasStore.getState().removeEdge(edgeId)
 
     useCanvasUiStore.getState().setPendingDelete({
@@ -926,6 +955,20 @@ export function useCanvasPersistence() {
     logger.info("[persistence] edge deleted from Supabase", { edgeId: edge.id })
     // TODO(contract-layer): there is no edge.deleted canvas-event yet either
     // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
+  }
+
+  // "Drop both links" outcome of the relate-leg prompt — removes both legs so
+  // the AI note stays but hangs unconnected (the user chose this deliberately
+  // in the prompt, so there's no per-edge undo toast). Both go through the
+  // same commit path as a single hover-delete, one Supabase delete each.
+  function deleteRelateLegs(legEdgeIds: string[]) {
+    const edges = useCanvasStore.getState().edges
+    const toDelete = legEdgeIds
+      .map((id) => edges.find((e) => e.id === id))
+      .filter((e): e is CanvasEdge => !!e)
+    for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+    useCanvasUiStore.getState().setRelateLegPrompt(null)
+    void Promise.all(toDelete.map((e) => commitEdgeDelete(e)))
   }
 
   // Set aside (soft-archive) — only ever an accepted AI node. Reversible, so
@@ -1018,5 +1061,6 @@ export function useCanvasPersistence() {
     decideGhost,
     setAsideNode,
     restoreSetAsideNode,
+    deleteRelateLegs,
   }
 }

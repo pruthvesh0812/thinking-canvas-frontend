@@ -668,6 +668,10 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
                 border: "1px solid var(--tc-amber)",
                 color: "var(--tc-amber-ink-strong)",
                 letterSpacing: ".02em",
+                // Opt this chip back into hit-testing (the wrapper is
+                // pointer-events-none so the chip row never blocks node
+                // interaction) so its title tooltip still shows on hover.
+                pointerEvents: "auto",
               }}
               title="AI contribution — accepted"
             >

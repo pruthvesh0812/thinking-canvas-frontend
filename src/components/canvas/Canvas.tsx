@@ -89,13 +89,16 @@ function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout } = useCanvasPersistence()
+  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout, setAsideNode, deleteRelateLegs } =
+    useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
   const backdropColor = useCanvasUiStore((s) => s.backdropColor)
   const showSetAside = useCanvasUiStore((s) => s.showSetAside)
   const toggleShowSetAside = useCanvasUiStore((s) => s.toggleShowSetAside)
+  const relateLegPrompt = useCanvasUiStore((s) => s.relateLegPrompt)
+  const setRelateLegPrompt = useCanvasUiStore((s) => s.setRelateLegPrompt)
   const pairs = useGhostStore((s) => s.pairs)
   const sessionId = useSessionStore((s) => s.sessionId)
   // The one SSE connection for the whole active session — opened here (once
@@ -543,9 +546,8 @@ function CanvasInner() {
                 type="button"
                 onClick={toggleShowSetAside}
                 aria-pressed={showSetAside}
-                className="absolute right-4 top-4 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px]"
+                className="absolute left-4 top-4 z-[8] flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px]"
                 style={{
-                  zIndex: 5,
                   border: "1px solid var(--tc-node-border)",
                   background: showSetAside ? "var(--tc-ink)" : "var(--tc-node)",
                   color: showSetAside ? "#f5f1e8" : "var(--tc-chrome)",
@@ -618,6 +620,63 @@ function CanvasInner() {
                   style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
                 >
                   Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Relate-leg delete prompt — a relate articulation's two legs + its
+            AI note are one unit, so deleting a single leg offers the two
+            coherent outcomes instead of silently half-connecting the note:
+            drop both legs (note stays, unlinked) or set the whole note aside
+            (reversible). Raised by requestEdgeDelete via detectRelateArticulation. */}
+        {!isHistory && relateLegPrompt && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
+            <div
+              className="pointer-events-auto rounded-[10px] p-3.5"
+              style={{
+                width: 320,
+                background: "var(--tc-node)",
+                border: "1px solid var(--tc-node-border)",
+                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
+              }}
+            >
+              <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                Remove this connection?
+              </div>
+              <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays on the
+                canvas, now unlinked — or set the whole note aside (it leaves the canvas and the AI stops using it; you
+                can restore it anytime).
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => deleteRelateLegs(relateLegPrompt.legEdgeIds)}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                  style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                >
+                  Drop both links
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAsideNode(relateLegPrompt.aiNodeId)
+                    setRelateLegPrompt(null)
+                  }}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-black/80"
+                  style={{ border: "none", background: "var(--tc-ink)", color: "#f5f1e8", cursor: "pointer" }}
+                >
+                  Set the note aside
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRelateLegPrompt(null)}
+                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                  style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
+                >
+                  Cancel
                 </button>
               </div>
             </div>

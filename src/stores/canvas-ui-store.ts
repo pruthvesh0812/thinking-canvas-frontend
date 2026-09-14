@@ -18,6 +18,16 @@ export interface PendingDelete {
   undo: () => void
 }
 
+/** A `relate` articulation whose leg the user just tried to delete. The two
+ * legs (A→C, B→C) plus the AI note C are one unit, so deleting a single leg
+ * would leave C claiming a relationship it only half-connects — instead
+ * use-canvas-persistence.ts raises this prompt and Canvas.tsx offers the two
+ * coherent outcomes (drop both legs, or set the whole note aside). */
+export interface RelateLegPrompt {
+  aiNodeId: string
+  legEdgeIds: string[]
+}
+
 // Ephemeral view state for the canvas chrome — never persisted, never
 // touches Supabase. Kept separate from canvas-store (real graph data) and
 // session-store (canvas/session meta) per STATE-MANAGEMENT.md's one-store-
@@ -54,6 +64,10 @@ interface CanvasUiStore {
    * like every toggle here. */
   showSetAside: boolean
   toggleShowSetAside: () => void
+  /** Set when a `relate` leg-delete needs the user to choose an outcome
+   * (see RelateLegPrompt). Null when no such prompt is open. */
+  relateLegPrompt: RelateLegPrompt | null
+  setRelateLegPrompt: (prompt: RelateLegPrompt | null) => void
 }
 
 export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
@@ -64,6 +78,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
   canvasBackdrop: "paper",
   backdropColor: null,
   showSetAside: false,
+  relateLegPrompt: null,
   setActivePen: (pen) => set({ activePen: pen }),
   toggleThreadsRail: () => set((s) => ({ threadsRailOpen: !s.threadsRailOpen })),
   setThreadsRailOpen: (open) => set({ threadsRailOpen: open }),
@@ -73,4 +88,5 @@ export const useCanvasUiStore = create<CanvasUiStore>()((set) => ({
   setCanvasBackdrop: (backdrop) => set({ canvasBackdrop: backdrop }),
   setBackdropColor: (color) => set({ backdropColor: color }),
   toggleShowSetAside: () => set((s) => ({ showSetAside: !s.showSetAside })),
+  setRelateLegPrompt: (prompt) => set({ relateLegPrompt: prompt }),
 }))
