@@ -307,6 +307,12 @@ function CanvasInner() {
     const anchoredEdgeIds = isHistory
       ? new Set<string>()
       : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
+    // Any edge touching a set-aside node (visible only while the toggle is on)
+    // reads muted too — it belongs to a note the AI is ignoring, so it
+    // shouldn't sit at full strength among the live edges. Covers both an edge
+    // from a live node into a set-aside one and an edge between two set-aside
+    // nodes. Never in history (set-aside has no imprint there).
+    const setAsideIds = new Set(visibleStoreNodes.filter((n) => n.data.setAsideAt).map((n) => n.id))
     const humanEdges: Edge[] = storeEdges
       // An edge whose other end doesn't exist yet would dangle in the past.
       .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target) && !anchoredEdgeIds.has(e.id))
@@ -320,6 +326,9 @@ function CanvasInner() {
         // Points at the target end — LogicalEdge/QuestionEdge already thread
         // markerEnd through to BaseEdge, this is what actually turns it on.
         markerEnd: { type: MarkerType.ArrowClosed, color: "#6A6154", width: 16, height: 16 },
+        // Fades the whole edge group (path + arrow) via CSS while keeping it
+        // clickable — see .tc-edge-muted in globals.css.
+        className: !isHistory && (setAsideIds.has(e.source) || setAsideIds.has(e.target)) ? "tc-edge-muted" : undefined,
         // Hover-to-delete is a live-canvas-only affordance, same rule as
         // node delete (CANVAS-RENDERING.md).
         data: { readOnly: isHistory },
