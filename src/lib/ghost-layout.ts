@@ -23,15 +23,11 @@ export function ghostPositions(trigger: NodeShape | undefined) {
   }
 }
 
-// The geometric midpoint between two endpoints' centers — the anchor point
-// a `relate` edge's diamond conceptually sits at. Canvas.tsx plants a
-// purely decorative RelateAnchorNode here (see RelateAnchorNode.tsx) marking
-// where the rest-state diamond sat; the ghost's actual drop-lines run from
-// both endpoint nodes straight to the ghost card, not from this point.
-// Kept as its own export (not inlined into ghostPositionsFromEdge) so the
-// anchor node and the ghost card position are both derived from the
-// identical calculation — they'd drift apart silently if each
-// rounded/computed the midpoint its own way.
+// The geometric midpoint between two endpoints' centers — where a `relate`
+// edge's diamond conceptually sits. Used to place the ghost card below the
+// relation's midpoint (ghostPositionsFromEdge); the diamond itself is drawn
+// by RelateEdge on the still-visible edge, and the ghost's drop-lines run
+// from both endpoint nodes straight to the ghost card.
 export function relateAnchorPosition(endpoints: [NodeShape, NodeShape]): { x: number; y: number } {
   const [a, b] = endpoints
   const x = (a.position.x + a.width / 2 + b.position.x + b.width / 2) / 2

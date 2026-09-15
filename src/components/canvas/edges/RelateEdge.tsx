@@ -6,14 +6,11 @@ import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 
-// Dashed line with a midpoint ◇ — "how are these two related?" Once a pair
-// spawns off this edge (triggerEdgeId matches this edge's id), Canvas.tsx
-// hides this edge outright — its two ghost drop-lines stand in for it while
-// the pair is pending, and use-canvas-persistence.ts deletes it for good on
-// acceptance — so this component only ever renders at rest and needs no
-// anchoring-specific look of its own (RelateAnchorNode carries that instead,
-// planted at the edge's would-be midpoint via ghost-layout.ts's
-// relateAnchorPosition).
+// Dashed line with a midpoint ◇ — "how are these two related?" Stays visible
+// while a pair is pending off it, so its own diamond marks the relation and
+// the ghost hangs from the real edge (Canvas.tsx no longer hides it); on
+// accept it's replaced by the two materialized legs (also relate-styled), on
+// reject it's removed (use-canvas-persistence.ts).
 //
 // Click-to-reveal delete + drag-to-bend affordances are shared with
 // LogicalEdge/QuestionEdge — mounted once the invisible hit-path is
@@ -63,9 +60,8 @@ export function RelateEdge({
   }, [clicked])
 
   const revealed = !readOnly && clicked
-  // Rest-state diamond only — small, outlined. The anchoring visual (larger,
-  // solid amber, glowing) lives on RelateAnchorNode now, not here; see the
-  // render guard below.
+  // The edge's midpoint diamond — small, outlined; always drawn, so it stays
+  // on the edge whether or not a ghost pair is pending off it.
   const diamondSize = 10
   const diamondFill = "transparent"
   const diamondStroke = "rgba(43,38,34,.55)"

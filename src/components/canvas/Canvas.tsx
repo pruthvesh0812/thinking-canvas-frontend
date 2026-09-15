@@ -28,11 +28,10 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorPosition, relateAnchorSourceHandle } from "@/lib/ghost-layout"
+import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
-import { RelateAnchorNode, type RelateAnchorFlowNode } from "./nodes/RelateAnchorNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
 import { GhostQuestionNode, type GhostQuestionFlowNode } from "../ghost/GhostQuestionNode"
 import { LogicalEdge } from "./edges/LogicalEdge"
@@ -55,7 +54,6 @@ const nodeTypes: NodeTypes = {
   humanNode: HumanNode,
   ghostContext: GhostContextNode,
   ghostQuestion: GhostQuestionNode,
-  relateAnchor: RelateAnchorNode,
 }
 
 const edgeTypes: EdgeTypes = {
@@ -63,13 +61,6 @@ const edgeTypes: EdgeTypes = {
   questionEdge: QuestionEdge,
   relateEdge: RelateEdge,
   ghostEdge: GhostEdge,
-}
-
-// The React Flow node id a `relate`-triggered pair's midpoint anchor uses —
-// shared by the nodes memo (plants it) and the edges memo (sources the
-// ghost's drop-line from it), so the two never drift out of sync.
-function relateAnchorId(triggerEdgeId: string): string {
-  return `relate-anchor:${triggerEdgeId}`
 }
 
 // True when an edge between these two nodes would cross the set-aside
@@ -252,28 +243,15 @@ function CanvasInner() {
     if (isHistory) return humanNodes
 
     const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
-    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode | RelateAnchorFlowNode)[] = []
+    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
-      // A `relate`-triggered Articulator pair hangs below the midpoint of
-      // its edge's two endpoints, not next to a single trigger node — and
-      // plants a purely decorative anchor node at that midpoint marking
-      // where the rest-state diamond sat. The ghost's own drop-lines (edges
-      // memo below) run from BOTH endpoints straight to the ghost card, not
-      // from this anchor — React Flow edges need a real node to source from,
-      // and "both nodes point at the ghost" is the actual spec.
+      // A `relate`-triggered Articulator pair hangs below the midpoint of its
+      // edge's two endpoints, not next to a single trigger node. Its diamond
+      // stays on the still-visible relate edge (RelateEdge) — no separate
+      // anchor node — and the ghost's drop-lines (edges memo below) run from
+      // BOTH endpoints straight to the ghost card.
       const endpoints = relateEndpoints(pair, nodesById)
       const pos = endpoints ? ghostPositionsFromEdge(endpoints) : ghostPositions(nodesById.get(triggerNodeId))
-      if (endpoints && pair.triggerEdgeId) {
-        ghostNodes.push({
-          id: relateAnchorId(pair.triggerEdgeId),
-          type: "relateAnchor",
-          position: relateAnchorPosition(endpoints),
-          data: { triggerNodeId },
-          draggable: false,
-          selectable: false,
-          deletable: false,
-        })
-      }
       ghostNodes.push({
         id: pair.descriptor.context_node.ghost_id,
         type: "ghostContext",
@@ -308,15 +286,11 @@ function CanvasInner() {
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
-    // A `relate` edge with a pending pair anchored to it is being replaced,
-    // not just annotated — its two ghost drop-lines (below) stand in for it
-    // for as long as the pair is pending, so the original edge is hidden
-    // outright rather than rendered alongside them. Rejecting the pair
-    // removes it from `pairs` with the edge itself untouched, so it simply
-    // reappears; accepting deletes it for good (use-canvas-persistence.ts).
-    const anchoredEdgeIds = isHistory
-      ? new Set<string>()
-      : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
+    // While a `relate` pair is pending its edge stays visible (RelateEdge —
+    // dashed line + its own midpoint diamond) so the ghost hangs off the real
+    // edge and its diamond, rather than the edge being hidden and a separate
+    // diamond floating at a computed midpoint. On accept the edge is replaced
+    // by the two legs; on reject it's removed (use-canvas-persistence.ts).
     // Any edge touching a set-aside node (visible only while the toggle is on)
     // reads muted too — it belongs to a note the AI is ignoring, so it
     // shouldn't sit at full strength among the live edges. Covers both an edge
@@ -325,7 +299,7 @@ function CanvasInner() {
     const setAsideIds = new Set(visibleStoreNodes.filter((n) => n.data.setAsideAt).map((n) => n.id))
     const humanEdges: Edge[] = storeEdges
       // An edge whose other end doesn't exist yet would dangle in the past.
-      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target) && !anchoredEdgeIds.has(e.id))
+      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
       .map((e) => ({
         id: e.id,
         source: e.source,

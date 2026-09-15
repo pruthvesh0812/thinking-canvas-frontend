@@ -85,13 +85,17 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
     // (opacity on a parent can't be undone by a child's own opacity).
     <div
       className="nodrag relative"
-      style={{ width, minHeight }}
+      style={{ width }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* In-flow (not absolute) so the wrapper grows with the streamed text —
+          an absolute inset-0 face stayed pinned to the fixed minHeight and the
+          content overflowed the dashed border. minHeight is just a floor now. */}
       <div
-        className="absolute inset-0 rounded-[10px] px-[15px] py-3 text-[14.5px] leading-[1.5]"
+        className="rounded-[10px] px-[15px] py-3 text-[14.5px] leading-[1.5]"
         style={{
+          minHeight,
           boxSizing: "border-box",
           fontStyle: appreciation ? "normal" : "italic",
           color: rejected ? "var(--tc-chrome)" : "var(--tc-ink)",
