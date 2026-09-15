@@ -185,6 +185,15 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
     if (materialized && relateEndpoints && originalRelateEdge) {
       await deleteRelateEdge(originalRelateEdge)
     }
+  } else if (pair.triggerEdgeId && originalRelateEdge) {
+    // Reject of a `relate`-triggered articulation: the relate edge was a
+    // one-shot "articulate this" trigger that's now been declined. Leaving it
+    // as `relate` would read as still-pending on the canvas and keep the
+    // stored edge_type saying `relate` to the backend — so downgrade it to a
+    // plain logical connection, preserving the link the user drew. (No accept
+    // path ran, so deleteRelateEdge did not; a materialize that failed keeps
+    // contextAccepted true and lands in the branch above, not here.)
+    await downgradeRelateEdgeToLogical(originalRelateEdge)
   }
   if (questionAccepted && pair.descriptor.question_edge) {
     // question_edge.from is the CONTEXT ghost id — if context was rejected
@@ -341,6 +350,44 @@ async function materializeAcceptedGhost(
 // resurrect it alongside its two replacements (the exact double-up this is
 // meant to prevent, and now unrecoverable). Keeping both in sync on failure
 // leaves the redundant relate edge visible so the user can hand-delete it.
+async function deleteRelateEdge(edge: CanvasEdge) {
+  if (!edge.synced) {
+    useCanvasStore.getState().removeEdge(edge.id)
+    return
+  }
+  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
+  if (error) {
+    logger.warn("[ghost-interaction] replaced relate edge delete failed — leaving it on canvas", {
+      edgeId: edge.id,
+      error,
+    })
+    return
+  }
+  useCanvasStore.getState().removeEdge(edge.id)
+  logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
+}
+
+// Downgrades a rejected relate edge to a plain `logical` connection. A relate
+// edge is a one-shot "articulate this" trigger; once its articulation is
+// rejected it must not linger as `relate` — visually it would read as still
+// pending, and the stored edge_type would keep telling the backend it's a
+// relate edge. The link the user drew is preserved, just as a logical one.
+// No canvas-event: there is no edge.updated pipeline, and re-notifying must
+// not re-trigger the articulator — the backend reads the corrected edge_type
+// off the row on its next canvas read. Optimistic store write first; a failed
+// Supabase update reverts it so store and row stay in sync.
+async function downgradeRelateEdgeToLogical(edge: CanvasEdge) {
+  useCanvasStore.getState().setEdgeType(edge.id, "logical")
+  if (!edge.synced) return
+  const { error } = await supabase.from("edges").update({ edge_type: "logical" }).eq("id", edge.id)
+  if (error) {
+    logger.warn("[ghost-interaction] rejected relate edge downgrade failed, reverting", { edgeId: edge.id, error })
+    useCanvasStore.getState().setEdgeType(edge.id, "relate")
+    return
+  }
+  logger.info("[ghost-interaction] rejected relate edge downgraded to logical", { edgeId: edge.id })
+}
+
 // Recognizes an edge as one leg of an accepted `relate` articulation, purely
 // from live graph shape (no persisted marker needed, so it holds after a
 // reload too): its target is an owner:'ai' note with EXACTLY two incoming
@@ -357,23 +404,6 @@ function detectRelateArticulation(edge: CanvasEdge): { aiNodeId: string; legEdge
   const legsOut = edges.filter((e) => e.source === target.id)
   if (legsIn.length !== 2 || legsOut.length !== 0) return null
   return { aiNodeId: target.id, legEdgeIds: legsIn.map((e) => e.id) }
-}
-
-async function deleteRelateEdge(edge: CanvasEdge) {
-  if (!edge.synced) {
-    useCanvasStore.getState().removeEdge(edge.id)
-    return
-  }
-  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
-  if (error) {
-    logger.warn("[ghost-interaction] replaced relate edge delete failed — leaving it on canvas", {
-      edgeId: edge.id,
-      error,
-    })
-    return
-  }
-  useCanvasStore.getState().removeEdge(edge.id)
-  logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
 }
 
 // The write-then-notify loop (STATE-MANAGEMENT.md): every user node/edge
