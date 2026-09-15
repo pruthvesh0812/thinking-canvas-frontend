@@ -286,14 +286,20 @@ function CanvasInner() {
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
-    // Once a `relate` pair spawns, its edge (and its diamond) disappears while
-    // the articulation ghost is pending — the ghost's drop-lines stand in for
-    // it. The edge is only hidden here, not removed: on accept it's replaced
-    // by the two legs, on reject it's removed for good (use-canvas-persistence
-    // .ts). Rejecting via re-decide would otherwise just un-hide it.
+    // The relate edge (and its diamond) stays visible through the "forming"
+    // window — from the draw until the articulation node actually appears with
+    // content — then disappears once the first chunk lands (or the pair is
+    // done). So the hide keys on the ghost having started streaming, not merely
+    // on the pair existing at spawn (when only the empty frame is up). The edge
+    // is only hidden here, not removed: on accept it's replaced by the two
+    // legs, on reject it's removed for good (use-canvas-persistence.ts).
     const anchoredEdgeIds = isHistory
       ? new Set<string>()
-      : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
+      : new Set(
+          Object.values(pairs)
+            .filter((p) => p.triggerEdgeId && (p.contextText !== "" || p.streamed))
+            .map((p) => p.triggerEdgeId as string),
+        )
     // Any edge touching a set-aside node (visible only while the toggle is on)
     // reads muted too — it belongs to a note the AI is ignoring, so it
     // shouldn't sit at full strength among the live edges. Covers both an edge
