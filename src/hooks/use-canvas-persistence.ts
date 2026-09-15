@@ -150,10 +150,15 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   // edge per anchor instead, so the settled graph keeps the shape the ghost
   // promised. Node-triggered spawns are unaffected — one anchor, one edge.
   // Each carries the same handle its ghost drop-line used, so the two real
-  // edges leave from the exact side the replaced relate edge did.
+  // edges leave from the exact side the replaced relate edge did. edge_type is
+  // forced to `relate` so the settled legs keep the relate look (dashed line +
+  // midpoint diamond, RelateEdge) rather than rendering as straight logical
+  // edges — visual/data only: they never fire edge.created, so this can't
+  // re-trigger the articulator, and the leg-delete prompt is shape-based.
   const contextEdges = relateEndpoints
     ? pair.anchorNodeIds.map((from) => ({
         ...pair.descriptor.context_edge,
+        edge_type: "relate" as const,
         from,
         sourceHandle: relateAnchorSourceHandle(from, originalRelateEdge),
       }))
