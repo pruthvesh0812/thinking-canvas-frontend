@@ -187,13 +187,12 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
     }
   } else if (pair.triggerEdgeId && originalRelateEdge) {
     // Reject of a `relate`-triggered articulation: the relate edge was a
-    // one-shot "articulate this" trigger that's now been declined. Leaving it
-    // as `relate` would read as still-pending on the canvas and keep the
-    // stored edge_type saying `relate` to the backend — so downgrade it to a
-    // plain logical connection, preserving the link the user drew. (No accept
-    // path ran, so deleteRelateEdge did not; a materialize that failed keeps
+    // one-shot "articulate this" trigger. Once its articulation is declined
+    // the edge has served its purpose and should not linger — remove it
+    // entirely (the accept path removes it too, there replaced by the two
+    // legs; on reject nothing replaces it). (A materialize that failed keeps
     // contextAccepted true and lands in the branch above, not here.)
-    await downgradeRelateEdgeToLogical(originalRelateEdge)
+    await deleteRelateEdge(originalRelateEdge)
   }
   if (questionAccepted && pair.descriptor.question_edge) {
     // question_edge.from is the CONTEXT ghost id — if context was rejected
@@ -365,27 +364,6 @@ async function deleteRelateEdge(edge: CanvasEdge) {
   }
   useCanvasStore.getState().removeEdge(edge.id)
   logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
-}
-
-// Downgrades a rejected relate edge to a plain `logical` connection. A relate
-// edge is a one-shot "articulate this" trigger; once its articulation is
-// rejected it must not linger as `relate` — visually it would read as still
-// pending, and the stored edge_type would keep telling the backend it's a
-// relate edge. The link the user drew is preserved, just as a logical one.
-// No canvas-event: there is no edge.updated pipeline, and re-notifying must
-// not re-trigger the articulator — the backend reads the corrected edge_type
-// off the row on its next canvas read. Optimistic store write first; a failed
-// Supabase update reverts it so store and row stay in sync.
-async function downgradeRelateEdgeToLogical(edge: CanvasEdge) {
-  useCanvasStore.getState().setEdgeType(edge.id, "logical")
-  if (!edge.synced) return
-  const { error } = await supabase.from("edges").update({ edge_type: "logical" }).eq("id", edge.id)
-  if (error) {
-    logger.warn("[ghost-interaction] rejected relate edge downgrade failed, reverting", { edgeId: edge.id, error })
-    useCanvasStore.getState().setEdgeType(edge.id, "relate")
-    return
-  }
-  logger.info("[ghost-interaction] rejected relate edge downgraded to logical", { edgeId: edge.id })
 }
 
 // Recognizes an edge as one leg of an accepted `relate` articulation, purely

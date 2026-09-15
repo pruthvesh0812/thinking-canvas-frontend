@@ -175,11 +175,6 @@ interface CanvasStore {
   /** Flips data.synced true after an edge's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markEdgeSynced: (id: string) => void
-  /** Changes an edge's type in place. Today's only caller downgrades a
-   * `relate` edge to `logical` once its articulation is rejected
-   * (use-canvas-persistence.ts) — optimistic, rolled back on a failed
-   * Supabase write. */
-  setEdgeType: (id: string, edgeType: EdgeType) => void
   /** Drag-to-bend commit — every pointermove frame while dragging the
    * middle-dot handle, same per-frame-update/commit-on-release split as
    * updateNodePosition/persistNodeLayout. Pass null to straighten. */
@@ -337,8 +332,6 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   restoreEdge: (edge) => set((s) => ({ edges: [...s.edges, edge] })),
   markEdgeSynced: (id) =>
     set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, synced: true } : e)) })),
-  setEdgeType: (id, edgeType) =>
-    set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, edgeType } : e)) })),
   updateEdgeBend: (id, bend) =>
     set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, bend } : e)) })),
   removeNode: (id) =>
