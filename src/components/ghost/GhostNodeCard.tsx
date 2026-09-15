@@ -24,7 +24,6 @@ export interface GhostNodeCardProps {
 // only one, when there's no question ghost; use-canvas-persistence.ts's
 // decideGhost owns that coordination and the real Supabase/API calls).
 export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: GhostNodeCardProps) {
-  const [hovered, setHovered] = useState(false)
   // Local: "about to reject, picking a reason" — a pre-decision step, not
   // itself a decision, so it stays out of the store.
   const [choosingReason, setChoosingReason] = useState(false)
@@ -83,12 +82,7 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
     // (below) is translucent. Controls and the reason popover are chrome,
     // not AI content, and must never inherit the ghost's translucency
     // (opacity on a parent can't be undone by a child's own opacity).
-    <div
-      className="nodrag relative"
-      style={{ width }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
+    <div className="nodrag relative" style={{ width }}>
       {/* In-flow (not absolute) so the wrapper grows with the streamed text —
           an absolute inset-0 face stayed pinned to the fixed minHeight and the
           content overflowed the dashed border. minHeight is just a floor now. */}
@@ -150,7 +144,7 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
         {badge}
       </div>
 
-      {streamed && hovered && !decided && !choosingReason && (
+      {streamed && !decided && !choosingReason && (
         appreciation ? (
           <div className="absolute left-[2px] top-full mt-2">
             <button
