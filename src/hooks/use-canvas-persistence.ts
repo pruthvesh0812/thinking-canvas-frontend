@@ -652,11 +652,12 @@ export function useCanvasPersistence() {
   // is the "committed, but still reversible for a few seconds" half.
   function requestNodeDelete(nodeId: string) {
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
-    // Ghost ids never appear in canvas-store (no-op by lookup failing), and
-    // AI-owned nodes are excluded by design (CANVAS-RENDERING.md — delete is
-    // "only human-owned elements") — both land here as a no-op rather than
-    // needing a special case at the call site.
-    if (!node || node.data.owner !== "human") return
+    // Ghost ids never appear in canvas-store, so they no-op by lookup failing.
+    // Both human and accepted-AI nodes may be deleted (AI nodes via their own
+    // kebab Delete — set aside is the recoverable alternative offered there).
+    // React Flow key-delete still only targets human nodes (Canvas.tsx's
+    // `deletable`), so this menu path is the only way to delete an AI node.
+    if (!node) return
 
     const connectedEdges = useCanvasStore.getState().edges.filter(
       (e) => e.source === nodeId || e.target === nodeId,

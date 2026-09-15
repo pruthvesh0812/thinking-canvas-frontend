@@ -614,6 +614,56 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
                       <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>◌</span>
                     </button>
                   )}
+                  <div style={{ height: 1, background: "var(--tc-hairline)", margin: "4px 6px" }} />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPopover("confirm")
+                    }}
+                    className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-[rgba(168,66,46,.08)]"
+                    style={{ border: "none", background: "transparent", color: "#a8422e", cursor: "pointer" }}
+                  >
+                    <span>Delete</span>
+                    <span className="text-[11px]" style={{ color: "#c99b8f" }}>⌫</span>
+                  </button>
+                </div>
+              )}
+
+              {popover === "confirm" && (
+                <div className="relative p-3.5">
+                  <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                    Delete this note?
+                  </div>
+                  <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                    This removes it for good. Set aside instead if you might want it back. You can undo for a few seconds
+                    after.
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                      style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                        requestNodeDelete(id)
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                      style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               )}
 
