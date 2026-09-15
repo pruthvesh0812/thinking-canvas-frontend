@@ -5,11 +5,6 @@
 // added 2026-08-11 per the layout-persistence contract update — re-copy from
 // the backend's regenerated file on the next full sync to pick up the
 // matching source commit.
-// nodes.set_aside_at (nullable timestamptz) hand-added 2026-09-08 for the
-// set-aside feature (backend migration 20260908000001_node_set_aside.sql,
-// commit fe02f3c) — the backend couldn't regenerate this file (local
-// Supabase/Docker down), so this one column was added by hand to match what
-// `supabase gen types` would emit; re-copy on the next full sync.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md and re-copy.
 // Used only to type the Supabase client generic (src/lib/supabase.ts) so
 // .from(table).select()/.insert() are checked against real columns.
@@ -364,7 +359,6 @@ export type Database = {
           id: string
           owner: string
           session_id: string
-          set_aside_at: string | null
           summary: string | null
           width: number | null
           x: number | null
@@ -380,7 +374,6 @@ export type Database = {
           id?: string
           owner?: string
           session_id: string
-          set_aside_at?: string | null
           summary?: string | null
           width?: number | null
           x?: number | null
@@ -396,7 +389,6 @@ export type Database = {
           id?: string
           owner?: string
           session_id?: string
-          set_aside_at?: string | null
           summary?: string | null
           width?: number | null
           x?: number | null

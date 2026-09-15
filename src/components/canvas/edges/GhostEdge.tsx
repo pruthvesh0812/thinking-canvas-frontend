@@ -1,17 +1,28 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from "@xyflow/react"
-import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
+import { useGhostStore, type GhostNodeStatus, type GhostPairSlot } from "@/stores/ghost-store"
 
 export interface GhostEdgeData extends Record<string, unknown> {
   pairKey: string
   slot: GhostPairSlot
 }
 
-// Mirrors GhostNodeCard's own drawing/streaming/pending read of the pair —
-// no more per-node status enum, just contextText/questionText + streamed.
-function edgeAppearance(text: string | undefined, streamed: boolean | undefined) {
-  if (text === undefined) return { opacity: 0, dash: "6 5" } // pair (or slot) gone
-  if (text === "" && !streamed) return { opacity: 0.3, dash: "6 5" } // drawing
-  return { opacity: 0.5, dash: "6 5" } // streaming or pending
+function edgeAppearance(status: GhostNodeStatus | undefined, showRejected: boolean) {
+  switch (status) {
+    case "accepted":
+      return { opacity: 0.8, dash: "0" }
+    case "rejected-pending-reason":
+      return { opacity: 0.32, dash: "6 5" }
+    case "rejected-final":
+      return { opacity: showRejected ? 0.28 : 0, dash: "6 5" }
+    case "drawing":
+      return { opacity: 0.3, dash: "6 5" }
+    case "streaming":
+    case "pending":
+      return { opacity: 0.5, dash: "6 5" }
+    case "hidden":
+    default:
+      return { opacity: 0, dash: "6 5" }
+  }
 }
 
 // Dashed, muted — connects a ghost to its trigger (or a nudge to its
@@ -19,16 +30,12 @@ function edgeAppearance(text: string | undefined, streamed: boolean | undefined)
 // node is pending (CANVAS-RENDERING.md).
 export function GhostEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data }: EdgeProps) {
   const edgeData = data as GhostEdgeData | undefined
-  // Two separate selectors, each returning a primitive — an object-literal
-  // selector would give useGhostStore a fresh reference every render and
-  // never settle (no shallow-compare wired into this store).
-  const text = useGhostStore((s) => {
-    const pair = edgeData ? s.pairs[edgeData.pairKey] : undefined
-    if (!pair || !edgeData) return undefined
-    return edgeData.slot === "context" ? pair.contextText : pair.questionText
+  const showRejected = useGhostStore((s) => s.showRejected)
+  const status = useGhostStore((s) => {
+    if (!edgeData) return undefined
+    return s.pairs[edgeData.pairKey]?.[edgeData.slot]?.status
   })
-  const streamed = useGhostStore((s) => (edgeData ? s.pairs[edgeData.pairKey]?.streamed : undefined))
-  const { opacity, dash } = edgeAppearance(text, streamed)
+  const { opacity, dash } = edgeAppearance(status, showRejected)
   const [path] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
   return (
     <BaseEdge
