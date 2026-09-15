@@ -124,7 +124,7 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
       const [{ data: nodeRows, error: nodesError }, { data: edgeRows, error: edgesError }] = await Promise.all([
         supabase
           .from("nodes")
-          .select("id, content, owner, x, y, width, height, session_id")
+          .select("id, content, owner, x, y, width, height, session_id, set_aside_at")
           .eq("canvas_id", canvasId)
           .order("created_at"),
         supabase
@@ -159,6 +159,9 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
           // dropped into a real past session (SessionLanding).
           sessionNumber: sessionNumberById.get(row.session_id) ?? 1,
           synced: true,
+          // Soft-archive state restored from the row — a set-aside AI node
+          // comes back hidden by default (Canvas.tsx), the toggle reveals it.
+          setAsideAt: row.set_aside_at ?? null,
         },
       }))
 

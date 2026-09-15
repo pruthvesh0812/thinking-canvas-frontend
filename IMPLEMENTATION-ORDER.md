@@ -22,12 +22,12 @@ contract impact, and definition of done.
 | 3 | `canvas-core` | 🟡 partial — **`canvas-event` notify never called** | Nodes on canvas, write-then-notify loop live | 2 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
 | 4 | `edge-system` | 🟡 partial — same notify gap; Doubt/AssociativeEdge unbuilt (low priority) | 4 edge types, selector, routing flags, question pulse | 3 | CORE-CONCEPTS + CANVAS-RENDERING + STATE-MANAGEMENT |
 | 5 | `ghost-streaming` | 🟡 UI-only — **no real SSE consumer; all ghosts are the scripted demo** | SSE hook, ghost store, ghosts appear + stream | 4 | CORE-CONCEPTS + GHOST-STREAMING + CANVAS-RENDERING |
-| 6 | `ghost-interaction` | 🟡 UI-only — accept/reject never persists or reports | Accept/reject, rejection reasons, materialization | 5 ⚠gap#1 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
+| 6 | `ghost-interaction` | 🟡 UI-only — accept/reject never persists or reports | Accept/reject, rejection reasons, materialization | 5 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 7 | `session-lifecycle` | ✅ done (v1 simplifications documented in-file) | North star capture, phase toggle, Session Complete, carry-forward | 6 | CORE-CONCEPTS + SESSION-FLOWS |
 | 8 | `canvas-dashboard` | ✅ done | Multi-canvas home, create/open flow | 7 | CORE-CONCEPTS + SESSION-FLOWS |
 | 9 | `auth` | 🟡 partial — anonymous sign-in only; conversion/gate/login unbuilt | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
-| 10 | `billing-and-tiers` | ⬜ not started — settings/login still stub pages | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#4 | ARCHITECTURE + API-CONTRACT |
-| 11 | `observer-structure-ui` | ⬜ not started — **backend-blocked** | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#2 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
+| 10 | `billing-and-tiers` | ⬜ not started — settings/login still stub pages | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#5 | ARCHITECTURE + API-CONTRACT |
+| 11 | `observer-structure-ui` | ⬜ not started — **backend-blocked** | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#4 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 12 | `session-selector` | ✅ done (closed 2026-08-31) | Real session history browsing (replaces mock-sessions.ts UI) | 8 | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
 
 ### What to pick up next
@@ -43,19 +43,32 @@ work happened, so its agent pipeline never fires, so `ghost-streaming`'s
 ghost experience today is `use-intervention-demo.ts`'s scripted timer, not
 the product.
 
+None of this is backend-blocked — API-CONTRACT.md/GHOST-STREAMING.md's
+2026-08-05 sync already resolved the gaps (`thread_id`/`turn_index`
+attribution, server-side marker splitting, hold-open SSE) that earlier
+drafts of this file cited as reasons to wait. It's purely unbuilt frontend
+work, in this order:
+
 **Recommended order from here:**
 1. Wire `canvasEvent` into `use-canvas-persistence.ts`'s node-content-commit
    and edge-create paths (small, closes `canvas-core`+`edge-system` for real).
 2. Verify against a running local backend that the agent pipeline actually
    fires — this is the first point the *real* product loop can be observed.
-3. Build `ghost-streaming`'s actual `use-ghost-stream.ts` (EventSource on
-   `GET /api/stream/:sessionId`, spawn/chunk/done dispatch into the existing
-   `ghost-store.ts`) — the store and every ghost UI component already exist
-   as the render target; this hook is the only missing piece.
-4. Wire `ghost-interaction`'s `materializeGhost` (Supabase insert, currently
-   a logged stub) and `ghostStatus` call (currently unused) once real pairs
-   exist to accept/reject — still partly gated on Known Gap #1 for the
-   status payload, but the Supabase insert half doesn't need to wait for that.
+3. Rewrite `ghost-store.ts` to the shape `GHOST-STREAMING.md` § Ghost Store
+   Shape specifies (`appendChunk`/`setNodeType`/`markDone`/`attribution`,
+   accumulated text instead of full-text-up-front) and build the real
+   `use-ghost-stream.ts` (EventSource on `GET /api/stream/:sessionId` —
+   `GHOST-STREAMING.md` § The useGhostStream Hook has the exact code to
+   start from). The ghost UI components are the render target and mostly
+   reusable, but they currently read the mock store's `displayedText`
+   typewriter field — expect them to need adjusting to the new shape too.
+   `use-intervention-demo.ts` can stay for manual QA of the visual sequence
+   once it's no longer the only path feeding the store.
+4. Wire `ghost-interaction`'s `materializeGhost` (Supabase insert + edges,
+   currently a logged stub) and the `ghostStatus`/`ghost.accepted` calls
+   (currently unused) once real pairs exist to accept/reject — nothing left
+   blocking this backend-side; `thread_id`/`turn_index` come straight off
+   `done`.
 5. Only after that loop is real end-to-end does `auth`'s remaining half
    (signup prompt after Session Complete, `/login`, `middleware.ts` gate) or
    `billing-and-tiers` become worth starting — both are still genuinely
@@ -86,22 +99,31 @@ the product.
 
 ### Cross-repo gaps to watch (full detail: API-CONTRACT.md → Known Gaps)
 
-> Closed 2026-08-16: second active session per canvas going unrejected by
-> `session/start` (this table's own #8 / API-CONTRACT.md's #7 — the two
-> lists are curated separately, not 1:1 numbered). `thinking-canvas-be`
-> commit `a46d851` made the route idempotent per canvas instead; removed
-> from the table below, see `session-selector` story's update note.
+> **Renumbered 2026-08-31 to match API-CONTRACT.md's own table exactly** —
+> this table had drifted from it and was citing gaps as open that were
+> already resolved. Two batches of closures folded in:
+> - **2026-08-05** (`thinking-canvas-api`'s "frontend-contract-holes" story):
+>   `done` now carries `thread_id`/`turn_index` (old #1, below); markers are
+>   split server-side into `chunk`/`node_type` messages, so there's no raw
+>   stream left to parse (old #6); the SSE connection holds open for the
+>   whole session, no reconnect-per-ghost (old #6b); `ghost.accepted`
+>   enrichment exists (old #5). All four are gone from the table — GHOST-
+>   STREAMING.md and API-CONTRACT.md reflect the fix, not the old workarounds.
+> - **2026-08-16:** second active session per canvas going unrejected by
+>   `session/start` (old #8 here / API-CONTRACT.md's old #7). `thinking-
+>   canvas-be` commit `a46d851` made the route idempotent per canvas
+>   instead; see `session-selector` story's update note.
+>
+> What's left is exactly API-CONTRACT.md's current Known Gaps table:
 
 | Gap | Blocks | Action |
 |---|---|---|
-| #1 thread_id/turn_index not on the stream | story 6's ghost-status call | coordinate backend enrichment of `done`/`spawn` **before starting story 6** |
-| #2 no observer-edge-status route | story 11 | backend adds route + structure read path |
-| #3 create-only canvas events | edit/delete fidelity (stories 3+) | backend intervention-spectrum task-06; frontend just leaves seam comments |
-| #4 no checkout endpoint | story 10 | v1 = Stripe Payment Link |
-| #5 accepted-ghost enrichment undecided | story 6 (quality, not blocking) | needs a backend decision; document in PR |
-| #6 raw markers on one stream (context ghost only) | **story 5** — the ghost store must parse `[NODE_TYPE:]`/`[QUESTION]`/`[ARTICULATION]` and route the question text itself | build the parser now (GHOST-STREAMING → Content Delivery); a backend server-side split would later simplify it |
-| #6b SSE closes after every `done` | story 5 (reconnect is normal; overlapping ghosts truncate) | tolerate reconnect-per-ghost; flag backend hold-open |
-| #7 free tier still gets Outer-Sub on question edges | story 10 (UpgradePrompt logic) | don't gate the question-edge UI on tier until backend gates the pipeline |
+| #1 no auth on any `/api/*` route or the SSE stream | all stories (any origin-bypassing client can post events / read a stream by uuid) | backend should verify a Supabase JWT; token query-param for EventSource |
+| #2 free tier still gets Outer-Sub on question edges (tier only checked in the debounced pipeline) | story 10 (UpgradePrompt logic) | don't gate the question-edge UI on tier until backend gates the pipeline too |
+| #3 `carry_forward_ids` accepted by the schema, ignored by the pipeline | story 7 (session-lifecycle's Carry Forward screen) | backend should wire it into session-complete, or drop it from the schema until built |
+| #4 no `observer-edge-status` route (schema exists, no route) | story 11 | backend adds the route + a structure read path |
+| #5 no checkout endpoint, only the webhook | story 10 | v1 = Stripe Payment Link |
+| #6 canvas events still create-only — `node.updated`/`node.deleted`/`edge.deleted` accepted by schema, no pipeline re-enriches on them | edit/delete fidelity (stories 3+) | backend needs to extend real handling to the mutation event types; frontend just leaves seam comments |
 
 ---
 

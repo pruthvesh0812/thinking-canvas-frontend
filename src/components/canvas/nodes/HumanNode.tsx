@@ -10,7 +10,7 @@ import {
   type NodeProps,
   type ResizeParamsWithDirection,
 } from "@xyflow/react"
-import { useGhostStore } from "@/stores/ghost-store"
+import { useGhostStore, isHaloAnchor } from "@/stores/ghost-store"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useCanvasStore, type CanvasNodeData } from "@/stores/canvas-store"
 
@@ -19,7 +19,6 @@ export type HumanNodeData = CanvasNodeData & {
   /** Manual height from the corner resize handle. Undefined = auto-fit
    * content (the default until the user drags the corner). */
   height?: number
-  onRevealPair?: (triggerNodeId: string) => void
   /** Historical view: an earlier session's node, present as context only. */
   dimmed?: boolean
   /** Historical view: no editing, no handles, no ghost interaction. */
@@ -30,6 +29,11 @@ export type HumanNodeData = CanvasNodeData & {
    * selected, Canvas.tsx's own listener owns the shared group-delete
    * confirm instead. */
   soloSelected?: boolean
+  /** Live-canvas set-aside state — true only when this AI node is currently
+   * set aside AND we're on the live canvas (the toggle revealed it). Drives
+   * the muted styling, the "Set aside" chip, and the Bring-back action.
+   * Never true in history (a past session shows the node normally). */
+  setAside?: boolean
 }
 export type HumanFlowNode = Node<HumanNodeData, "humanNode">
 
@@ -64,17 +68,23 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   // "menu" = Duplicate/Delete list, "confirm" = the delete guard's Cancel/
   // Delete step. Two distinct modes (not a boolean) because the confirm
   // step must survive a hover-leave that would otherwise close "menu".
-  const [popover, setPopover] = useState<"closed" | "menu" | "confirm">("closed")
+  const [popover, setPopover] = useState<"closed" | "menu" | "confirm" | "confirmSetAside">("closed")
   const [draft, setDraft] = useState(data.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { persistNodeContent, persistNodeLayout, requestNodeDelete, duplicateNode } = useCanvasPersistence()
+  const { persistNodeContent, persistNodeLayout, requestNodeDelete, duplicateNode, setAsideNode, restoreSetAsideNode } =
+    useCanvasPersistence()
   const updateNodeWidth = useCanvasStore((s) => s.updateNodeWidth)
   const updateNodeSize = useCanvasStore((s) => s.updateNodeSize)
 
-  const pair = useGhostStore((s) => s.pairs[id])
-  const revealPair = data.onRevealPair
+  // A pending ghost pair glows every node it names as an anchor — for
+  // today's node-triggered spawns that's just the trigger node itself
+  // (behavior-identical to the old `!!pairs[id]` check, since anchorNodeIds
+  // defaults to `[trigger_node_id]`), but a future `relate`-edge trigger
+  // pulls both endpoints into the halo simultaneously — one code path,
+  // driven by ghost-store's `anchorNodeIds`.
+  const isAnchor = useGhostStore((s) => isHaloAnchor(s, id))
   const readOnly = !!data.readOnly
-  const showHalo = !readOnly && !!pair && !pair.revealed
+  const showHalo = !readOnly && isAnchor
   const highlighted = useCanvasStore((s) => s.highlightedNodeId === id)
 
   useLayoutEffect(() => {
@@ -205,16 +215,19 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
                 ? "0 0 0 1px rgba(43,38,34,.18), 0 2px 6px rgba(43,38,34,.1)"
                 : "0 1px 2px rgba(43,38,34,.07)",
         // Earlier sessions stay present as context but never compete with
-        // the session actually being viewed.
-        opacity: data.dimmed ? 0.25 : 1,
+        // the session actually being viewed. A set-aside node reads quieter
+        // still — muted opacity + desaturated — so it's unmistakably out of
+        // the active canvas even while the toggle is showing it. Kept clearly
+        // above the .25 history-dim so the two states never look identical.
+        opacity: data.dimmed ? 0.25 : data.setAside ? 0.5 : 1,
+        filter: data.setAside ? "grayscale(0.7)" : undefined,
         cursor: readOnly ? "default" : editing ? "text" : "pointer",
-        transition: "opacity .4s ease, box-shadow .15s ease, border-color .15s ease",
+        transition: "opacity .4s ease, box-shadow .15s ease, border-color .15s ease, filter .2s ease",
         animation: showHalo ? "tc-bloom .9s ease-out both" : highlighted ? "tc-fadeup .3s ease-out both" : undefined,
       }}
       onMouseEnter={() => {
         if (readOnly) return
         setHovered(true)
-        if (showHalo) revealPair?.(id)
       }}
       onMouseLeave={() => setHovered(false)}
       onPointerDown={onPointerDown}
@@ -492,14 +505,192 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           )}
         </div>
       )}
-      {data.aiMarker && (
-        <span
-          className="absolute right-2 top-1 text-xs"
-          style={{ color: "var(--tc-chrome-quiet)" }}
-          title="AI contribution — accepted"
+      {/* AI-node actions — accepted AI nodes have no delete (they're kept
+          forever), but they CAN be set aside: removed from the live canvas
+          and from the AI's reasoning, reversibly. Same kebab + popover chrome
+          as the human menu; a given node is human XOR ai, so the shared
+          `popover` state never serves both at once. An already-set-aside node
+          (only reachable at all while the "show set aside" toggle is on —
+          Canvas.tsx) offers Restore instead: the toggle is visibility-only,
+          it does NOT bring a node back into AI reasoning by itself — Restore
+          (clearing set_aside_at) is the only thing that does. */}
+      {!readOnly && data.owner === "ai" && (
+        <div
+          className="tc-node-menu nodrag absolute"
+          style={{
+            right: -30,
+            top: 6,
+            opacity: hovered || popover !== "closed" || selected ? 1 : 0,
+            transition: "opacity .15s ease",
+          }}
+          onMouseEnter={() => setPopover((p) => (p === "closed" ? "menu" : p))}
+          onMouseLeave={() => setPopover((p) => (p === "menu" ? "closed" : p))}
         >
-          ◌
-        </span>
+          <button
+            type="button"
+            aria-label="Node actions"
+            aria-expanded={popover !== "closed"}
+            onClick={(e) => {
+              e.stopPropagation()
+              setPopover((p) => (p === "closed" ? "menu" : "closed"))
+            }}
+            className="flex items-center justify-center rounded-md"
+            style={{
+              width: 22,
+              height: 26,
+              border: "1px solid var(--tc-node-border)",
+              background: "var(--tc-node)",
+              boxShadow: "0 1px 2px rgba(43,38,34,.08)",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--tc-chrome)">
+              <circle cx="5" cy="1.5" r="1.1" />
+              <circle cx="5" cy="5" r="1.1" />
+              <circle cx="5" cy="8.5" r="1.1" />
+            </svg>
+          </button>
+
+          {popover !== "closed" && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute rounded-[10px]"
+              style={{
+                left: 0,
+                top: 26,
+                width: 236,
+                background: "var(--tc-node)",
+                border: "1px solid var(--tc-node-border)",
+                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
+                zIndex: 20,
+              }}
+            >
+              <div
+                className="absolute"
+                style={{
+                  left: 8,
+                  top: -5,
+                  width: 9,
+                  height: 9,
+                  background: "var(--tc-node)",
+                  borderLeft: "1px solid var(--tc-node-border)",
+                  borderTop: "1px solid var(--tc-node-border)",
+                  transform: "rotate(45deg)",
+                }}
+              />
+
+              {popover === "menu" && (
+                <div className="relative p-[5px]">
+                  {data.setAside ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                        restoreSetAsideNode(id)
+                      }}
+                      className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-black/5"
+                      style={{ border: "none", background: "transparent", color: "var(--tc-ink)", cursor: "pointer" }}
+                    >
+                      <span>Restore</span>
+                      <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>↩</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("confirmSetAside")
+                      }}
+                      className="flex w-full items-center justify-between rounded-md px-[9px] py-[7px] text-left text-[13px] hover:bg-black/5"
+                      style={{ border: "none", background: "transparent", color: "var(--tc-ink)", cursor: "pointer" }}
+                    >
+                      <span>Set aside</span>
+                      <span className="text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>◌</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {popover === "confirmSetAside" && (
+                <div className="relative p-3.5">
+                  <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                    Set this aside?
+                  </div>
+                  <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                    It leaves the canvas and the AI stops using it for reasoning. Turn on “Show set aside” to find it
+                    again, then Restore it from its menu whenever you want the AI to consider it.
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                      style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPopover("closed")
+                        setAsideNode(id)
+                      }}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-black/80"
+                      style={{ border: "none", background: "var(--tc-ink)", color: "#f5f1e8", cursor: "pointer" }}
+                    >
+                      Set aside
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Identity/state chips — "AI" marks any accepted AI node forever
+          (CANVAS-RENDERING.md: a persistent marker, human vs AI stays
+          distinguishable), "Set aside" adds alongside it once that node is
+          set aside (live canvas only — never in history, matching the muted
+          styling above). Two chips, not one combined label, so each state
+          reads independently at a glance. */}
+      {(data.aiMarker || data.setAside) && (
+        <div className="pointer-events-none absolute left-0 flex gap-1" style={{ top: -11 }}>
+          {data.aiMarker && (
+            <span
+              className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+              style={{
+                background: "rgba(201,144,58,.14)",
+                border: "1px solid var(--tc-amber)",
+                color: "var(--tc-amber-ink-strong)",
+                letterSpacing: ".02em",
+                // Opt this chip back into hit-testing (the wrapper is
+                // pointer-events-none so the chip row never blocks node
+                // interaction) so its title tooltip still shows on hover.
+                pointerEvents: "auto",
+              }}
+              title="AI contribution — accepted"
+            >
+              AI
+            </span>
+          )}
+          {data.setAside && (
+            <span
+              className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+              style={{
+                background: "var(--tc-ink)",
+                color: "#f5f1e8",
+                letterSpacing: ".02em",
+              }}
+            >
+              Set aside
+            </span>
+          )}
+        </div>
       )}
       {data.seedSource && (
         <span

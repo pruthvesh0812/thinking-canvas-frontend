@@ -53,6 +53,17 @@ export function PenRack() {
           </span>
         </span>,
       )}
+      {row(
+        "relate",
+        "Relate",
+        // Dashed line + a small ◇ at the midpoint — matches RelateEdge.tsx's
+        // rest-state visual exactly, so the pen preview is a truthful preview.
+        <svg width="34" height="10" viewBox="0 0 34 10">
+          <line x1="1" y1="5" x2="32" y2="5" stroke="#6A6154" strokeWidth="1.5" strokeDasharray="3 2.5" />
+          <path d="M26 1.5 L32 5 L26 8.5 z" fill="#6A6154" />
+          <rect x="14.5" y="2.5" width="5" height="5" fill="var(--tc-surface)" stroke="#6A6154" strokeWidth="1" transform="rotate(45 17 5)" />
+        </svg>,
+      )}
     </div>
   )
 }

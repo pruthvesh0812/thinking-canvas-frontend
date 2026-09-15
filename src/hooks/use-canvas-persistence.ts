@@ -1,9 +1,12 @@
 import { useCanvasStore, type CanvasEdge, type CanvasNode, type HumanEdgeType } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
-import { useGhostStore, type GhostPairSlot } from "@/stores/ghost-store"
+import { useGhostStore, hasQuestionGhost, type GhostPairSlot, type GhostPairState, type GhostSlotDecision } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { supabase } from "@/lib/supabase"
+import { canvasEvent, ghostStatus } from "@/lib/api"
+import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
+import type { EdgeType, RejectionReason } from "@/types"
 
 // How long a guarded delete stays undoable before it commits for real. Kept
 // as module state, not store state — it's a side-effect timer, not display
@@ -27,8 +30,16 @@ function groupDeleteLabel(count: number): string {
   return `${count} nodes`
 }
 
-function edgeDeleteLabel(edgeType: HumanEdgeType): string {
-  return edgeType === "question" ? "Question edge" : "Logical edge"
+function edgeDeleteLabel(edgeType: EdgeType): string {
+  // "logical"/"question"/"relate" are human-drawable (the pen rack's three
+  // pens); doubt/associative are AI-drawn only, but an accepted ghost edge
+  // can carry either — undo-toast copy for those falls back to the generic
+  // label rather than widening this switch for two types nothing lets a
+  // human delete-confirm differently anyway.
+  if (edgeType === "question") return "Question edge"
+  if (edgeType === "logical") return "Logical edge"
+  if (edgeType === "relate") return "Relate edge"
+  return "Edge"
 }
 
 // Flip to "true" to fall back to the old local-only mock (no Supabase writes)
@@ -64,10 +75,321 @@ function handleSide(handle: string | null | undefined): string | null {
   return handle.split("-")[0].toUpperCase()
 }
 
-// The write-then-notify loop (STATE-MANAGEMENT.md) has no backend to notify
-// yet — canvas-core/contract-layer haven't landed, so the Supabase write
-// below happens with NO POST /api/canvas-event call after it. That seam is
-// commented where it belongs so wiring it in later is a drop-in.
+// ghost-interaction (API-CONTRACT.md § Accept flow): records this slot's
+// call, then — once BOTH slots are decided (or the only one, when there's
+// no question ghost) — fires the real materialize/ghost-status/canvas-event
+// sequence exactly once. Mixed outcomes (context accepted, question
+// rejected) are one ghost-status call with two statuses, never two calls,
+// so nothing fires while a decision is still outstanding. Module-scope, not
+// inside the hook — it closes over nothing hook-local (only .getState()
+// accessors and module imports), and the react-hooks/purity rule otherwise
+// flags the Date.now() below as an impure call "during render" even though
+// this only ever runs from a click handler.
+function decideGhost(
+  triggerNodeId: string,
+  slot: GhostPairSlot,
+  decision: GhostSlotDecision,
+  reason?: RejectionReason,
+) {
+  useGhostStore.getState().recordDecision(triggerNodeId, slot, decision, reason)
+  const pair = useGhostStore.getState().pairs[triggerNodeId]
+  if (!pair) return // pair already gone (e.g. its trigger node was deleted mid-decision)
+
+  const questionExists = hasQuestionGhost(pair)
+  const contextDecided = pair.contextDecision !== undefined
+  const questionDecided = !questionExists || pair.questionDecision !== undefined
+  if (!contextDecided || !questionDecided) return // waiting on the other slot
+
+  void resolveGhostPair(triggerNodeId, pair, questionExists)
+}
+
+async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, questionExists: boolean) {
+  const ids = currentIds()
+  if (!ids) {
+    logger.error("[ghost-interaction] no canvas/session in context — skipping", { triggerNodeId })
+    return
+  }
+  // Controls only ever appear once `streamed` (GhostNodeCard), and `done`
+  // sets attribution in the same write as streamed — this should be
+  // unreachable, but ghost-status has nowhere to read thread_id/turn_index
+  // from without it.
+  if (!pair.attribution) {
+    logger.error("[ghost-interaction] pair has no attribution at decision time", { triggerNodeId })
+    return
+  }
+
+  const contextAccepted = pair.contextDecision === "accepted"
+  const questionAccepted = questionExists && pair.questionDecision === "accepted"
+  // Mirrors Canvas.tsx's own edge-vs-node position choice exactly, so the
+  // accepted node lands precisely where the ghost was hanging — a
+  // `relate`-triggered pair floats at its edge's midpoint, not next to a
+  // single trigger node.
+  const nodes = useCanvasStore.getState().nodes
+  const [anchorA, anchorB] = pair.anchorNodeIds
+  const nodeA = anchorA ? nodes.find((n) => n.id === anchorA) : undefined
+  const nodeB = anchorB ? nodes.find((n) => n.id === anchorB) : undefined
+  // Exactly the condition Canvas.tsx's relateEndpoints uses, so what
+  // acceptance persists can't disagree with what the ghost showed.
+  const relateEndpoints = pair.triggerEdgeId && nodeA && nodeB ? ([nodeA, nodeB] as const) : undefined
+  const positions = relateEndpoints
+    ? ghostPositionsFromEdge([relateEndpoints[0], relateEndpoints[1]])
+    : ghostPositions(nodes.find((n) => n.id === triggerNodeId))
+
+  // The relate edge this pair replaced — still on the canvas (Canvas.tsx
+  // only hides it while pending, never deletes it up front) so its handle
+  // sides are still readable here. Looked up before the delete below.
+  const originalRelateEdge = pair.triggerEdgeId
+    ? useCanvasStore.getState().edges.find((e) => e.id === pair.triggerEdgeId)
+    : undefined
+
+  // While pending, a `relate` pair's ghost hangs from BOTH endpoints — one
+  // drop-line each (Canvas.tsx's edges memo). The descriptor names only one
+  // edge (context_edge.from is the trigger node, i.e. one endpoint), so
+  // materializing it alone would silently drop the second connection and
+  // the accepted node would land wired to a single node. Persist one real
+  // edge per anchor instead, so the settled graph keeps the shape the ghost
+  // promised. Node-triggered spawns are unaffected — one anchor, one edge.
+  // Each carries the same handle its ghost drop-line used, so the two real
+  // edges leave from the exact side the replaced relate edge did.
+  const contextEdges = relateEndpoints
+    ? pair.anchorNodeIds.map((from) => ({
+        ...pair.descriptor.context_edge,
+        from,
+        sourceHandle: relateAnchorSourceHandle(from, originalRelateEdge),
+      }))
+    : [pair.descriptor.context_edge]
+
+  // 1. Insert accepted node(s) + connecting edge(s), owner:'ai', reusing
+  //    the ghost UUID as the node id — landed at the same spot the ghost
+  //    was floating, so acceptance reads as a settle (CANVAS-RENDERING.md).
+  //    Articulator content persists PARSED, markers stripped — never the
+  //    raw [ARTICULATION n]-tagged stream (GHOST-STREAMING.md § Content
+  //    Delivery / ghost-interaction's Contract Impact).
+  const contextContent = pair.articulations ? pair.articulations.join("\n\n") : pair.contextText
+  if (contextAccepted) {
+    const materialized = await materializeAcceptedGhost(
+      pair.descriptor.context_node.ghost_id,
+      contextContent,
+      positions.context,
+      GHOST_WIDTH.context,
+      contextEdges,
+      ids,
+    )
+    // The two edges just materialized above permanently replace the relate
+    // edge this pair spawned from — Canvas.tsx only hid it while pending, so
+    // delete it for real now. But ONLY if materialization actually succeeded:
+    // if the accepted node/edges failed to insert (materializeAcceptedGhost
+    // returns false after logging + rolling back), deleting the relate edge
+    // too would destroy the connection with nothing standing in for it. Leave
+    // it in place so the pair reappears and the user can retry.
+    if (materialized && relateEndpoints && originalRelateEdge) {
+      await deleteRelateEdge(originalRelateEdge)
+    }
+  } else if (pair.triggerEdgeId && originalRelateEdge) {
+    // Reject of a `relate`-triggered articulation: the relate edge was a
+    // one-shot "articulate this" trigger. Once its articulation is declined
+    // the edge has served its purpose and should not linger — remove it
+    // entirely (the accept path removes it too, there replaced by the two
+    // legs; on reject nothing replaces it). (A materialize that failed keeps
+    // contextAccepted true and lands in the branch above, not here.)
+    await deleteRelateEdge(originalRelateEdge)
+  }
+  if (questionAccepted && pair.descriptor.question_edge) {
+    // question_edge.from is the CONTEXT ghost id — if context was rejected
+    // (never inserted above), this insert's FK fails and rolls itself back,
+    // silently declining an "accept the question, reject its own grounding"
+    // combination. Not a real product path ("ground before nudge, never
+    // question-first" — CORE-CONCEPTS.md), so that's an acceptable failure
+    // mode rather than something worth its own guard.
+    await materializeAcceptedGhost(
+      pair.descriptor.question_node!.ghost_id,
+      pair.questionText,
+      positions.question,
+      GHOST_WIDTH.question,
+      [pair.descriptor.question_edge],
+      ids,
+    )
+  }
+
+  // 2. POST /api/ghost-status — thread_id/turn_index straight off `done`'s
+  //    attribution (no agent_threads read needed). Fire-and-forget, same
+  //    swallow-after-logging rule as canvasEvent — api.ts's post() already
+  //    logs a failure.
+  const interactedAt = Date.now()
+  void ghostStatus({
+    thread_id: pair.attribution.thread_id,
+    turn_index: pair.attribution.turn_index,
+    canvas_id: ids.canvasId,
+    session_id: ids.sessionId,
+    context_node_status: pair.contextDecision!,
+    question_node_status: questionExists ? pair.questionDecision! : null,
+    ...(pair.rejectionReason ? { rejection_reason: pair.rejectionReason } : {}),
+    interacted_at: interactedAt,
+  }).catch(() => {})
+
+  // 3. POST /api/canvas-event('ghost.accepted') enriches the accepted
+  //    node(s) (summary/embedding/node_sequence + an ai_contributions
+  //    row) — never fired on an all-reject outcome (nothing to enrich),
+  //    and never re-triggers an agent either way.
+  const acceptedIds = [
+    ...(contextAccepted ? [pair.descriptor.context_node.ghost_id] : []),
+    ...(questionAccepted ? [pair.descriptor.question_node!.ghost_id] : []),
+  ]
+  if (acceptedIds.length > 0) {
+    void canvasEvent({
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      event_type: "ghost.accepted",
+      node_ids: acceptedIds,
+      agent_role: pair.descriptor.context_node.agent_role,
+    }).catch(() => {})
+  }
+
+  // 4. The ghost layer's job ends here — accepted node(s) already live in
+  //    canvas-store as real nodes (step 1); anything rejected just vanishes.
+  useGhostStore.getState().resolve(triggerNodeId)
+}
+
+// Insert one accepted ghost's node + its connecting edge(s) as a single
+// unit — owner:'ai', both_existing:false. Usually one edge; a `relate`
+// pair passes two (one per anchor), and they go in as ONE multi-row
+// insert so the pair can't half-land. The edge insert is skipped (and the
+// node rolled back) if the node insert itself failed; a node insert
+// succeeding but its edges failing leaves an orphaned real node with no
+// rollback, same asymmetric-failure tradeoff writeEdge already accepts
+// for the human-drawn path (retryPendingEdges has no equivalent here —
+// ghost-status still fires either way, so a retry isn't wired).
+// Returns true only when the accepted node AND its edge(s) both landed —
+// the caller uses that to decide whether it's safe to delete the relate edge
+// this pair replaced (a failed materialize must leave that edge in place).
+async function materializeAcceptedGhost(
+  ghostId: string,
+  content: string,
+  position: { x: number; y: number },
+  width: number,
+  edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
+  ids: { canvasId: string; sessionId: string },
+): Promise<boolean> {
+  const { error: nodeError } = await supabase.from("nodes").insert({
+    id: ghostId,
+    canvas_id: ids.canvasId,
+    session_id: ids.sessionId,
+    owner: "ai",
+    content,
+    x: position.x,
+    y: position.y,
+    width,
+    height: null,
+  })
+  if (nodeError) {
+    logger.warn("[ghost-interaction] accepted node insert failed", { ghostId, error: nodeError })
+    return false
+  }
+
+  const edgeRows = edgeSpecs.map((spec) => ({
+    id: crypto.randomUUID(),
+    canvas_id: ids.canvasId,
+    session_id: ids.sessionId,
+    from_node_id: spec.from,
+    to_node_id: spec.to,
+    // Same bare-side-only convention as writeEdge's handleSide — a `relate`
+    // pair's specs carry the replaced edge's matching side (contextEdges
+    // above); a node-triggered spawn never sets one.
+    from_handle: handleSide(spec.sourceHandle),
+    to_handle: null,
+    edge_type: spec.edge_type,
+    both_existing: false,
+  }))
+  const { error: edgeError } = await supabase.from("edges").insert(edgeRows)
+  if (edgeError) {
+    logger.warn("[ghost-interaction] accepted edge insert failed, rolling back node", { ghostId, error: edgeError })
+    await supabase.from("nodes").delete().eq("id", ghostId)
+    return false
+  }
+
+  useCanvasStore.getState().addAiNode(
+    {
+      id: ghostId,
+      position,
+      width,
+      data: {
+        content,
+        owner: "ai",
+        aiMarker: true,
+        sessionNumber: useSessionStore.getState().sessionNumber ?? 1,
+        synced: true,
+      },
+    },
+    edgeRows.map((row, i) => ({
+      id: row.id,
+      source: row.from_node_id,
+      target: row.to_node_id,
+      edgeType: row.edge_type,
+      // The compound "<side>-source" id, not the DB's bare-side row above —
+      // React Flow needs it to actually connect at that handle.
+      sourceHandle: edgeSpecs[i].sourceHandle,
+      synced: true,
+    })),
+  )
+  logger.info("[ghost-interaction] accepted ghost materialized", {
+    ghostId,
+    edgeIds: edgeRows.map((row) => row.id),
+  })
+  return true
+}
+
+// Permanently removes the relate edge a just-accepted pair replaced — no
+// undo window (unlike requestEdgeDelete's human-hover path): the two real
+// edges materialized above already stand in its place, so leaving it around
+// would double up the connection it depicted.
+//
+// The Supabase delete happens BEFORE the local removal, and the local removal
+// is skipped if it fails — otherwise the store and Supabase disagree: the
+// edge would be gone locally but still on the row, so a reload/hydrate would
+// resurrect it alongside its two replacements (the exact double-up this is
+// meant to prevent, and now unrecoverable). Keeping both in sync on failure
+// leaves the redundant relate edge visible so the user can hand-delete it.
+async function deleteRelateEdge(edge: CanvasEdge) {
+  if (!edge.synced) {
+    useCanvasStore.getState().removeEdge(edge.id)
+    return
+  }
+  const { error } = await supabase.from("edges").delete().eq("id", edge.id)
+  if (error) {
+    logger.warn("[ghost-interaction] replaced relate edge delete failed — leaving it on canvas", {
+      edgeId: edge.id,
+      error,
+    })
+    return
+  }
+  useCanvasStore.getState().removeEdge(edge.id)
+  logger.info("[ghost-interaction] replaced relate edge deleted", { edgeId: edge.id })
+}
+
+// Recognizes an edge as one leg of an accepted `relate` articulation, purely
+// from live graph shape (no persisted marker needed, so it holds after a
+// reload too): its target is an owner:'ai' note with EXACTLY two incoming
+// edges and no outgoing ones — the two-drop-line signature materializeAccepted
+// Ghost leaves behind. An Expander/Stress-Tester context node fails this (one
+// incoming from its trigger, plus an outgoing edge to its question node), and
+// a plain human→human relate edge fails it (target isn't AI), so neither
+// trips the prompt. Returns the note id + both leg ids, or null.
+function detectRelateArticulation(edge: CanvasEdge): { aiNodeId: string; legEdgeIds: string[] } | null {
+  const { nodes, edges } = useCanvasStore.getState()
+  const target = nodes.find((n) => n.id === edge.target)
+  if (!target || target.data.owner !== "ai") return null
+  const legsIn = edges.filter((e) => e.target === target.id)
+  const legsOut = edges.filter((e) => e.source === target.id)
+  if (legsIn.length !== 2 || legsOut.length !== 0) return null
+  return { aiNodeId: target.id, legEdgeIds: legsIn.map((e) => e.id) }
+}
+
+// The write-then-notify loop (STATE-MANAGEMENT.md): every user node/edge
+// write below is followed by a fire-and-forget canvasEvent() call once the
+// Supabase write succeeds — never before, never blocking. Edits and deletes
+// intentionally do NOT notify (node.updated/edge.deleted have no reacting
+// pipeline yet — API-CONTRACT.md Known Gap #6); those seams stay commented
+// TODOs at their call sites.
 export function useCanvasPersistence() {
   const updateNodeContent = useCanvasStore((s) => s.updateNodeContent)
 
@@ -140,8 +462,21 @@ export function useCanvasPersistence() {
 
     useCanvasStore.getState().markNodeSynced(nodeId)
     logger.info("[persistence] node persisted to Supabase", { nodeId })
-    // TODO(contract-layer): POST /api/canvas-event('node.created') with IDs
-    // only, once notifying the backend is turned on.
+
+    // Only the first non-empty content commit is a creation — `node.synced`
+    // above was read before this upsert, so it still reflects pre-write
+    // state. A later edit reuses this same upsert path but must NOT refire
+    // node.created (no node.updated pipeline exists yet — Known Gap #6).
+    if (!node?.data.synced) {
+      // Fire-and-forget: never block the canvas on the backend round-trip
+      // (node.created's summary+embedding is synchronous and slow, ~1-3s).
+      // canvasEvent() throws on a non-2xx (api.ts's post()), which already
+      // logs the failure — catch here only so a backend error surfaces as a
+      // log line, not an unhandled promise rejection in the console.
+      void canvasEvent({ canvas_id: canvasId, session_id: sessionId, event_type: "node.created", node_id: nodeId }).catch(
+        () => {},
+      )
+    }
 
     retryPendingEdges(nodeId)
   }
@@ -295,8 +630,13 @@ export function useCanvasPersistence() {
 
     useCanvasStore.getState().markEdgeSynced(edge.id)
     logger.info("[persistence] edge persisted to Supabase", { edgeId: edge.id })
-    // TODO(contract-layer): POST /api/canvas-event('edge.created') with IDs
-    // only, once notifying the backend is turned on.
+    // Fire-and-forget, same rule (and same swallow-after-logging) as
+    // writeNodeContent's canvasEvent call — never block the canvas on the
+    // round-trip. both_existing:true above is what the backend reads to
+    // decide Articulator vs debounced flow, per edge_type (API-CONTRACT.md).
+    void canvasEvent({ canvas_id: canvasId, session_id: sessionId, event_type: "edge.created", edge_id: edge.id }).catch(
+      () => {},
+    )
   }
 
   // Guarded delete (Node Delete UI): hides the node immediately — same
@@ -319,10 +659,11 @@ export function useCanvasPersistence() {
 
     // Optimistic — the store cascades the connected edges itself. Also drop
     // any pending ghost pair keyed to this node: it would otherwise keep
-    // floating with a trigger that no longer exists. This is cleanup, not a
-    // reject decision, so it goes through dismiss, not requestReject.
+    // floating with a trigger that no longer exists. This is cleanup, not an
+    // accept/reject decision, but resolve() is the store's only removal
+    // action either way.
     useCanvasStore.getState().removeNode(nodeId)
-    useGhostStore.getState().dismiss(nodeId)
+    useGhostStore.getState().resolve(nodeId)
 
     useCanvasUiStore.getState().setPendingDelete({
       id: nodeId,
@@ -415,7 +756,7 @@ export function useCanvasPersistence() {
     // no-op for it.
     for (const node of targets) {
       useCanvasStore.getState().removeNode(node.id)
-      useGhostStore.getState().dismiss(node.id)
+      useGhostStore.getState().resolve(node.id)
     }
 
     const batchKey = `batch:${crypto.randomUUID()}`
@@ -558,6 +899,17 @@ export function useCanvasPersistence() {
     const edge = useCanvasStore.getState().edges.find((e) => e.id === edgeId)
     if (!edge) return
 
+    // A `relate` articulation's two legs (A→C, B→C into an AI note C) are one
+    // unit — dropping a single leg would leave C claiming a relationship it
+    // only half-connects. Detect that structurally and hand off to the
+    // Canvas-level prompt instead of a silent single-edge delete; the user
+    // picks drop-both-legs or set-the-note-aside there.
+    const relate = detectRelateArticulation(edge)
+    if (relate) {
+      useCanvasUiStore.getState().setRelateLegPrompt(relate)
+      return
+    }
+
     useCanvasStore.getState().removeEdge(edgeId)
 
     useCanvasUiStore.getState().setPendingDelete({
@@ -613,13 +965,96 @@ export function useCanvasPersistence() {
     // (API-CONTRACT Known Gap #3 / CANVAS-RENDERING.md) — nothing to notify.
   }
 
-  function materializeGhost(triggerNodeId: string, slot: GhostPairSlot) {
-    // TODO(ghost-interaction, contract-layer): Supabase insert of the
-    // accepted node (owner:'ai') + connecting edge, then POST
-    // /api/ghost-status — no canvas-event (the pipeline must not react to
-    // its own output). The accepted ghost keeps rendering from ghost-store;
-    // this only marks the seam where real materialization will happen.
-    logger.info("[ghost-interaction] ghost accepted (mock — no backend write)", { triggerNodeId, slot })
+  // "Drop both links" outcome of the relate-leg prompt — removes both legs so
+  // the AI note stays but hangs unconnected (the user chose this deliberately
+  // in the prompt, so there's no per-edge undo toast). Both go through the
+  // same commit path as a single hover-delete, one Supabase delete each.
+  function deleteRelateLegs(legEdgeIds: string[]) {
+    const edges = useCanvasStore.getState().edges
+    const toDelete = legEdgeIds
+      .map((id) => edges.find((e) => e.id === id))
+      .filter((e): e is CanvasEdge => !!e)
+    for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+    useCanvasUiStore.getState().setRelateLegPrompt(null)
+    void Promise.all(toDelete.map((e) => commitEdgeDelete(e)))
+  }
+
+  // Set aside (soft-archive) — only ever an accepted AI node. Reversible, so
+  // there's no undo-toast window like delete has; the "show set aside" toggle
+  // + Bring back is the recovery path. Optimistic store write first, then the
+  // Supabase set_aside_at write, then notify. The backend excludes a
+  // set-aside node (and any edge touching it) from all reasoning; the notify
+  // lets it treat this like a delete for any in-flight offer.
+  function setAsideNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    // Human nodes delete (never set aside); an already-set-aside node no-ops.
+    if (!node || node.data.owner !== "ai" || node.data.setAsideAt) return
+    const at = new Date().toISOString()
+    useCanvasStore.getState().setNodeAside(nodeId, at)
+    void writeSetAside(nodeId, at)
+  }
+
+  async function writeSetAside(nodeId: string, at: string) {
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[set-aside] node set aside (mock — no Supabase write)", { nodeId })
+      return
+    }
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[set-aside] no canvas/session in context — rolling back", { nodeId })
+      useCanvasStore.getState().bringNodeBack(nodeId)
+      return
+    }
+    const { error } = await supabase.from("nodes").update({ set_aside_at: at }).eq("id", nodeId)
+    if (error) {
+      logger.warn("[set-aside] write failed, rolling back", { nodeId, error })
+      useCanvasStore.getState().bringNodeBack(nodeId)
+      return
+    }
+    void canvasEvent({
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      event_type: "node.set_aside",
+      node_id: nodeId,
+    }).catch(() => {})
+    logger.info("[set-aside] node set aside", { nodeId })
+  }
+
+  // Bring a set-aside node back into the live canvas + reasoning. Captures
+  // the prior timestamp so a failed write can restore the exact set-aside
+  // state rather than a fabricated one.
+  function restoreSetAsideNode(nodeId: string) {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
+    const prevAt = node?.data.setAsideAt
+    if (!node || !prevAt) return
+    useCanvasStore.getState().bringNodeBack(nodeId)
+    void writeRestore(nodeId, prevAt)
+  }
+
+  async function writeRestore(nodeId: string, prevAt: string) {
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[set-aside] node brought back (mock — no Supabase write)", { nodeId })
+      return
+    }
+    const ids = currentIds()
+    if (!ids) {
+      logger.error("[set-aside] no canvas/session in context — rolling back", { nodeId })
+      useCanvasStore.getState().setNodeAside(nodeId, prevAt)
+      return
+    }
+    const { error } = await supabase.from("nodes").update({ set_aside_at: null }).eq("id", nodeId)
+    if (error) {
+      logger.warn("[set-aside] restore write failed, rolling back", { nodeId, error })
+      useCanvasStore.getState().setNodeAside(nodeId, prevAt)
+      return
+    }
+    void canvasEvent({
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      event_type: "node.restored",
+      node_id: nodeId,
+    }).catch(() => {})
+    logger.info("[set-aside] node brought back", { nodeId })
   }
 
   return {
@@ -631,6 +1066,9 @@ export function useCanvasPersistence() {
     requestNodesDelete,
     requestEdgeDelete,
     duplicateNode,
-    materializeGhost,
+    decideGhost,
+    setAsideNode,
+    restoreSetAsideNode,
+    deleteRelateLegs,
   }
 }
