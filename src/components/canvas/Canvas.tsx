@@ -428,6 +428,12 @@ function CanvasInner() {
     (connection) => {
       if (isHistory) return
       if (!connection.source || !connection.target) return
+      // No new edge may touch a set-aside node (it's out of the live graph).
+      // The set-aside node's handles are already inert (HumanNode's
+      // `connectable`); this is the backstop in case a connection still fires.
+      const nodes = useCanvasStore.getState().nodes
+      const isSetAside = (id: string) => !!nodes.find((n) => n.id === id)?.data.setAsideAt
+      if (isSetAside(connection.source) || isSetAside(connection.target)) return
       // Both endpoints already exist on the canvas — this pass has no
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
