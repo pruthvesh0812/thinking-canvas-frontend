@@ -6,11 +6,11 @@ import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 
-// Dashed line with a midpoint ◇ — "how are these two related?" Stays visible
-// while a pair is pending off it, so its own diamond marks the relation and
-// the ghost hangs from the real edge (Canvas.tsx no longer hides it); on
-// accept it's replaced by the two materialized legs (also relate-styled), on
-// reject it's removed (use-canvas-persistence.ts).
+// Dashed line with a midpoint ◇ — "how are these two related?" While a pair
+// is pending off it, Canvas.tsx hides it (edge + diamond) so only the
+// articulation ghost and its drop-lines show; on accept it's replaced by the
+// two materialized legs (also relate-styled), on reject it's removed
+// (use-canvas-persistence.ts).
 //
 // Click-to-reveal delete + drag-to-bend affordances are shared with
 // LogicalEdge/QuestionEdge — mounted once the invisible hit-path is

@@ -286,11 +286,14 @@ function CanvasInner() {
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
-    // While a `relate` pair is pending its edge stays visible (RelateEdge —
-    // dashed line + its own midpoint diamond) so the ghost hangs off the real
-    // edge and its diamond, rather than the edge being hidden and a separate
-    // diamond floating at a computed midpoint. On accept the edge is replaced
-    // by the two legs; on reject it's removed (use-canvas-persistence.ts).
+    // Once a `relate` pair spawns, its edge (and its diamond) disappears while
+    // the articulation ghost is pending — the ghost's drop-lines stand in for
+    // it. The edge is only hidden here, not removed: on accept it's replaced
+    // by the two legs, on reject it's removed for good (use-canvas-persistence
+    // .ts). Rejecting via re-decide would otherwise just un-hide it.
+    const anchoredEdgeIds = isHistory
+      ? new Set<string>()
+      : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
     // Any edge touching a set-aside node (visible only while the toggle is on)
     // reads muted too — it belongs to a note the AI is ignoring, so it
     // shouldn't sit at full strength among the live edges. Covers both an edge
@@ -299,7 +302,7 @@ function CanvasInner() {
     const setAsideIds = new Set(visibleStoreNodes.filter((n) => n.data.setAsideAt).map((n) => n.id))
     const humanEdges: Edge[] = storeEdges
       // An edge whose other end doesn't exist yet would dangle in the past.
-      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
+      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target) && !anchoredEdgeIds.has(e.id))
       .map((e) => ({
         id: e.id,
         source: e.source,
