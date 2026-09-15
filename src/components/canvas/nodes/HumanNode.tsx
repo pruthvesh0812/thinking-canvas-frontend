@@ -201,6 +201,11 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
         // Manual height acts as a floor: the node never shrinks below it,
         // but typing past it still lets the textarea push the wrapper taller.
         minHeight: data.height,
+        // When the top-right chips are present (AI nodes), reserve extra top
+        // padding so the content starts below them instead of colliding with
+        // the first line. Chips are absolutely positioned from the top edge,
+        // so this only pushes the content down. Overrides py-3's top only.
+        ...(data.aiMarker || data.setAside ? { paddingTop: 30 } : {}),
         background: "var(--tc-node)",
         borderColor: hovered && !readOnly && !selected && !showHalo ? "rgba(43,38,34,.4)" : "var(--tc-node-border)",
         color: "var(--tc-ink)",
