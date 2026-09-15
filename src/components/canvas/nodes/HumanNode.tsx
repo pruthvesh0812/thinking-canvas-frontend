@@ -657,9 +657,10 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           distinguishable), "Set aside" adds alongside it once that node is
           set aside (live canvas only — never in history, matching the muted
           styling above). Two chips, not one combined label, so each state
-          reads independently at a glance. */}
+          reads independently at a glance. Sit inside the card's top-right
+          corner (within the padding, not overhanging the border). */}
       {(data.aiMarker || data.setAside) && (
-        <div className="pointer-events-none absolute left-0 flex gap-1" style={{ top: -11 }}>
+        <div className="pointer-events-none absolute flex gap-1" style={{ top: 8, right: 12 }}>
           {data.aiMarker && (
             <span
               className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
