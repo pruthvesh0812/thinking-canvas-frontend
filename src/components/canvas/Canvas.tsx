@@ -640,57 +640,68 @@ function CanvasInner() {
             coherent outcomes instead of silently half-connecting the note:
             drop both legs (note stays, unlinked) or set the whole note aside
             (reversible). Raised by requestEdgeDelete via detectRelateArticulation. */}
-        {!isHistory && relateLegPrompt && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
-            <div
-              className="pointer-events-auto rounded-[10px] p-3.5"
-              style={{
-                width: 320,
-                background: "var(--tc-node)",
-                border: "1px solid var(--tc-node-border)",
-                boxShadow: "0 8px 24px rgba(43,38,34,.18)",
-              }}
-            >
-              <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
-                Remove this connection?
-              </div>
-              <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
-                This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays on the
-                canvas, now unlinked — or set the whole note aside (it leaves the canvas and the AI stops using it; you
-                can restore it anytime).
-              </div>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => deleteRelateLegs(relateLegPrompt.legEdgeIds)}
-                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
-                  style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
-                >
-                  Drop both links
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAsideNode(relateLegPrompt.aiNodeId)
-                    setRelateLegPrompt(null)
+        {!isHistory &&
+          relateLegPrompt &&
+          (() => {
+            // Offer "Set the note aside" only when the note isn't already set
+            // aside — for an already-set-aside articulation (its legs are only
+            // reachable at all with the toggle on) that option is a no-op, so
+            // the prompt drops to just Drop-both-links + Cancel.
+            const alreadySetAside = storeNodes.some((n) => n.id === relateLegPrompt.aiNodeId && !!n.data.setAsideAt)
+            return (
+              <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
+                <div
+                  className="pointer-events-auto rounded-[10px] p-3.5"
+                  style={{
+                    width: 320,
+                    background: "var(--tc-node)",
+                    border: "1px solid var(--tc-node-border)",
+                    boxShadow: "0 8px 24px rgba(43,38,34,.18)",
                   }}
-                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-black/80"
-                  style={{ border: "none", background: "var(--tc-ink)", color: "#f5f1e8", cursor: "pointer" }}
                 >
-                  Set the note aside
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRelateLegPrompt(null)}
-                  className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
-                  style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
-                >
-                  Cancel
-                </button>
+                  <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
+                    Remove this connection?
+                  </div>
+                  <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
+                    {alreadySetAside
+                      ? "This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays set aside, now unlinked."
+                      : "This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays on the canvas, now unlinked — or set the whole note aside (it leaves the canvas and the AI stops using it; you can restore it anytime)."}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => deleteRelateLegs(relateLegPrompt.legEdgeIds)}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
+                      style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
+                    >
+                      Drop both links
+                    </button>
+                    {!alreadySetAside && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAsideNode(relateLegPrompt.aiNodeId)
+                          setRelateLegPrompt(null)
+                        }}
+                        className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-black/80"
+                        style={{ border: "none", background: "var(--tc-ink)", color: "#f5f1e8", cursor: "pointer" }}
+                      >
+                        Set the note aside
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setRelateLegPrompt(null)}
+                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
+                      style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )
+          })()}
 
         {/* Guarded-delete undo toast (Node Delete UI) — one slot; a second
             delete while this is showing just replaces the label, it never
