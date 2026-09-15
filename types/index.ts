@@ -1,5 +1,18 @@
 // MIRRORED from thinking-canvas-api/types/index.ts
 // source commit: 21d9ac454915d1d6e0eb8f210b1c998150b76d12   synced: 2026-08-05
+// PARTIAL SYNC 2026-09-06: EdgeType + SpawnDescriptor's `relate`-edge fields
+// only, hand-pulled from thinking-canvas-api's working tree on branch
+// feature/node-position-persistence-2026-08-11T1200 (uncommitted at sync
+// time — no commit sha to cite). The mirror is ALSO independently stale
+// beyond this (missing EdgeHandle, Node.x/y/width/height, Edge.from_handle/
+// to_handle, all merged to the backend's main since 21d9ac4) — untouched
+// here as out of scope for the relate change; needs its own full resync.
+// PARTIAL SYNC 2026-09-08: Node.set_aside_at + the node.set_aside /
+// node.restored canvas-event types only, from thinking-canvas-api commit
+// fe02f3ccfaea79f2ca69628b6a8dbc4f98edf91f (branch above, pending merge to
+// main) — the "set aside" (soft-archive) feature. The position-persistence
+// staleness noted above is STILL untouched (different story); a full resync
+// is still owed once that branch lands on main.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md
 //
 // This repo does not ship zod at runtime (no `zod` dependency) — the
@@ -28,7 +41,13 @@ export type ContextNodeType =
   | 'contradiction'
   | 'appreciation'
 
-export type EdgeType = 'logical' | 'doubt' | 'question' | 'associative'
+// 'relate' is the DELIBERATE "articulate this connection" gesture — the only
+// edge type that triggers the Articulator immediately. 'logical' (and doubt /
+// associative) are silent structural edges: drawing one just rearranges the
+// canvas, absorbed into the next debounced pass, so the user isn't ambushed by
+// a ghost every time they tidy up their thinking. 'question' still fires the
+// Outer Subconscious.
+export type EdgeType = 'logical' | 'doubt' | 'question' | 'associative' | 'relate'
 
 export type DirectionMarker = 'establishes' | 'questions' | 'contradicts' | 'explores'
 
@@ -98,6 +117,13 @@ export type Node = {
   direction_marker: DirectionMarker | null // backend-written
   embedding: number[] | null // backend-written — VECTOR(3072)
   created_at: string
+  // Soft-archive — NULL = active (default), non-NULL = set aside at that
+  // instant. A set-aside node is preserved, never destroyed, but every
+  // backend reasoning read filters it (and any edge touching it) out live.
+  // Only owner='ai' nodes are ever set aside; frontend-written directly
+  // (same class as content/position edits), then notified via a
+  // node.set_aside / node.restored canvas-event.
+  set_aside_at: string | null
 }
 
 export type Edge = {
@@ -241,6 +267,16 @@ export type SpawnDescriptor = {
   trigger_node_id: string
   session_id: string
 
+  // Set for edge-triggered spawns (Articulator via a `relate` edge); undefined
+  // for node-triggered spawns (Expander / Stress-Tester / Outer Subconscious).
+  trigger_edge_id?: string
+
+  // The canvas nodes the ghost pair visually anchors to — the frontend drives
+  // its halos off this single field. ALWAYS populated: [trigger_node_id] for a
+  // node-triggered spawn, [from_node_id, to_node_id] (source first) for a
+  // relate-triggered Articulator run.
+  anchor_node_ids: string[]
+
   context_node: {
     ghost_id: string
     node_type: ContextNodeType
@@ -359,9 +395,13 @@ export type Subscription = {
 // here instead of by a runtime refinement.
 export type CanvasEvent =
   | {
+      // node.set_aside / node.restored carry set-aside state changes — the
+      // frontend writes nodes.set_aside_at directly to Supabase first, then
+      // notifies here (IDs only). node.set_aside is treated by the backend
+      // like node.deleted for any in-flight intervention offer.
       canvas_id: string
       session_id: string
-      event_type: 'node.created' | 'node.updated' | 'node.deleted'
+      event_type: 'node.created' | 'node.updated' | 'node.deleted' | 'node.set_aside' | 'node.restored'
       node_id: string
     }
   | {

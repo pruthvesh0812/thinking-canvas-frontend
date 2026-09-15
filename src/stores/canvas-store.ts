@@ -5,7 +5,7 @@ import { CURRENT_SESSION_NUMBER } from "@/lib/mock-sessions"
 // The two human-drawable edge types (CORE-CONCEPTS.md) — a restriction of the
 // backend's full EdgeType; `doubt`/`associative` are AI-drawn only and never
 // offered on the pen rack.
-export type HumanEdgeType = Extract<EdgeType, "logical" | "question">
+export type HumanEdgeType = Extract<EdgeType, "logical" | "question" | "relate">
 
 export interface CanvasNodeData extends Record<string, unknown> {
   content: string
@@ -28,6 +28,13 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * Purely a badge/visual marker — once edited, the node persists through
    * the ordinary human-node write path like any other. */
   seedSource?: "carried_forward" | "observer_suggestion"
+  /** Soft-archive ("set aside") timestamp (ISO), mirroring nodes.set_aside_at.
+   * Absent/null = active; a string = set aside at that instant. Only ever set
+   * on an owner:'ai' node — a set-aside node is preserved but removed from the
+   * live canvas and (backend-side) excluded from AI reasoning until brought
+   * back. Frontend-written: use-canvas-persistence.ts writes it to Supabase
+   * and notifies via a node.set_aside / node.restored canvas-event. */
+  setAsideAt?: string | null
 }
 
 export interface CanvasNode {
@@ -46,7 +53,12 @@ export interface CanvasEdge {
   id: string
   source: string
   target: string
-  edgeType: HumanEdgeType
+  // The full backend union, not just HumanEdgeType — an AI-materialized edge
+  // (addAiNode) can carry 'doubt'/'associative' too, which the pen rack never
+  // offers a human but the backend's SpawnDescriptor can (CANVAS-RENDERING.md's
+  // edge type table). Canvas.tsx's own rendering falls back to LogicalEdge's
+  // look for anything but 'question' until dedicated components exist.
+  edgeType: EdgeType
   sourceHandle?: string
   targetHandle?: string
   /** Absolute canvas point the edge is dragged through — the middle-dot
@@ -124,6 +136,14 @@ interface CanvasStore {
   /** Flips data.synced true after a node's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markNodeSynced: (id: string) => void
+  /** Marks an accepted AI node as set aside (soft-archive), stamping
+   * data.setAsideAt. Optimistic — use-canvas-persistence.ts writes
+   * set_aside_at to Supabase and notifies; a failed write rolls this back
+   * via bringNodeBack. */
+  setNodeAside: (id: string, at: string) => void
+  /** Clears a node's set-aside state (bring back) — the inverse of
+   * setNodeAside, same optimistic/rollback contract. */
+  bringNodeBack: (id: string) => void
   setHighlightedNode: (id: string | null) => void
   /** click-empty-canvas / "+ New node" — empty node in edit mode
    * (CANVAS-RENDERING.md Canvas Interactions). */
@@ -172,9 +192,12 @@ interface CanvasStore {
    * once; calling restoreNode per node instead would double-add an edge
    * that touched two of the restored nodes. */
   restoreNodes: (nodes: CanvasNode[], edges?: CanvasEdge[]) => void
-  /** Materializes an accepted ghost as a real owner:'ai' node + connecting
-   * edge — the ghost→real ownership transfer (CORE-CONCEPTS.md). */
-  addAiNode: (node: CanvasNode, edge: CanvasEdge) => void
+  /** Materializes an accepted ghost as a real owner:'ai' node + its
+   * connecting edge(s) — the ghost→real ownership transfer
+   * (CORE-CONCEPTS.md). Usually one edge; a `relate`-triggered pair takes
+   * TWO (one per anchor node), matching the two drop-lines the ghost hung
+   * from while pending (use-canvas-persistence.ts's resolveGhostPair). */
+  addAiNode: (node: CanvasNode, edges: CanvasEdge[]) => void
   /** Bulk-appends pre-loaded, edge-less starting points — carried-forward
    * unresolved threads on a new session, or an accepted Observer suggestion
    * (use-session-lifecycle.ts). Each arrives local-only (synced:false); the
@@ -246,6 +269,14 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
     })),
+  setNodeAside: (id, at) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, setAsideAt: at } } : n)),
+    })),
+  bringNodeBack: (id) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, setAsideAt: null } } : n)),
+    })),
   setHighlightedNode: (id) => set({ highlightedNodeId: id }),
   addNode: (position) => {
     const node: CanvasNode = {
@@ -313,8 +344,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
     set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   restoreNodes: (nodes, edges = []) =>
     set((s) => ({ nodes: [...s.nodes, ...nodes], edges: [...s.edges, ...edges] })),
-  addAiNode: (node, edge) =>
-    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, edge] })),
+  addAiNode: (node, edges) =>
+    set((s) => ({ nodes: [...s.nodes, node], edges: [...s.edges, ...edges] })),
   addSeededNodes: (nodes) => set((s) => ({ nodes: [...s.nodes, ...nodes] })),
   hydrate: (nodes, edges, baseline) =>
     set({ nodes, edges, highlightedNodeId: null, sessionBaseline: baseline ?? snapshotGraph(nodes, edges) }),

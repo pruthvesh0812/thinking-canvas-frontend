@@ -121,6 +121,14 @@ body {
   pointer-events: none !important;
 }
 
+/* An edge touching a set-aside node reads muted — it belongs to a note the AI
+   is ignoring. Fades the whole edge group (visible stroke, arrowhead, and the
+   invisible hit-path), while staying clickable so it can still be deleted.
+   Applied via the edge's className in Canvas.tsx (.tc-edge-muted). */
+.tc-scope .react-flow__edge.tc-edge-muted {
+  opacity: 0.4;
+}
+
 @keyframes tc-qpulse {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }
