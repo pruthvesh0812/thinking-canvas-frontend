@@ -84,10 +84,6 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   // driven by ghost-store's `anchorNodeIds`.
   const isAnchor = useGhostStore((s) => isHaloAnchor(s, id))
   const readOnly = !!data.readOnly
-  // A set-aside node accepts no new edges (in or out) — it's out of the live
-  // graph, so its handles are hidden and inert. onConnect in Canvas.tsx guards
-  // the same rule as a backstop.
-  const connectable = !readOnly && !data.setAside
   const showHalo = !readOnly && isAnchor
   const highlighted = useCanvasStore((s) => s.highlightedNodeId === id)
 
@@ -249,11 +245,11 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
             type="target"
             id={`${position}-target`}
             position={position}
-            isConnectable={connectable}
+            isConnectable={!readOnly}
             style={{
               ...HANDLE_STYLE,
-              opacity: connectable && hovered ? 1 : 0,
-              pointerEvents: connectable ? undefined : "none",
+              opacity: !readOnly && hovered ? 1 : 0,
+              pointerEvents: readOnly ? "none" : undefined,
               transition: "opacity .15s ease",
             }}
           />
@@ -261,11 +257,11 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
             type="source"
             id={`${position}-source`}
             position={position}
-            isConnectable={connectable}
+            isConnectable={!readOnly}
             style={{
               ...HANDLE_STYLE,
-              opacity: connectable && hovered ? 1 : 0,
-              pointerEvents: connectable ? undefined : "none",
+              opacity: !readOnly && hovered ? 1 : 0,
+              pointerEvents: readOnly ? "none" : undefined,
               transition: "opacity .15s ease",
             }}
           />

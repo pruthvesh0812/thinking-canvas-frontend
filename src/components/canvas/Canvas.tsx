@@ -9,6 +9,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  type Connection,
   type Edge,
   type EdgeTypes,
   type Node,
@@ -69,6 +70,16 @@ const edgeTypes: EdgeTypes = {
 // ghost's drop-line from it), so the two never drift out of sync.
 function relateAnchorId(triggerEdgeId: string): string {
   return `relate-anchor:${triggerEdgeId}`
+}
+
+// True when an edge between these two nodes would cross the set-aside
+// boundary: a set-aside node may connect only to other set-aside nodes, and a
+// live node only to live nodes. Both endpoints must share the same set-aside
+// state; a mismatch is disallowed (isValidConnection + onConnect).
+function crossesSetAsideBoundary(sourceId: string, targetId: string): boolean {
+  const nodes = useCanvasStore.getState().nodes
+  const isSetAside = (id: string) => !!nodes.find((n) => n.id === id)?.data.setAsideAt
+  return isSetAside(sourceId) !== isSetAside(targetId)
 }
 
 // Resolves a pair's two real endpoint nodes when it was spawned by a
@@ -428,12 +439,11 @@ function CanvasInner() {
     (connection) => {
       if (isHistory) return
       if (!connection.source || !connection.target) return
-      // No new edge may touch a set-aside node (it's out of the live graph).
-      // The set-aside node's handles are already inert (HumanNode's
-      // `connectable`); this is the backstop in case a connection still fires.
-      const nodes = useCanvasStore.getState().nodes
-      const isSetAside = (id: string) => !!nodes.find((n) => n.id === id)?.data.setAsideAt
-      if (isSetAside(connection.source) || isSetAside(connection.target)) return
+      // No edge may cross the set-aside boundary: a set-aside node connects
+      // only to other set-aside nodes, a live node only to live nodes. Both
+      // endpoints must share the same set-aside state (same rule as
+      // isValidConnection below; this is the backstop should a connect fire).
+      if (crossesSetAsideBoundary(connection.source, connection.target)) return
       // Both endpoints already exist on the canvas — this pass has no
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
@@ -448,6 +458,14 @@ function CanvasInner() {
     },
     [persistEdge, activePen, isHistory],
   )
+
+  // Live validity during the drag — React Flow marks the target invalid and
+  // won't fire onConnect for a connection that crosses the set-aside boundary
+  // (non-set-aside ↔ set-aside). Set-aside↔set-aside and live↔live are allowed.
+  const isValidConnection = useCallback((c: Connection | Edge) => {
+    if (!c.source || !c.target) return false
+    return !crossesSetAsideBoundary(c.source, c.target)
+  }, [])
 
   return (
     <div
@@ -501,6 +519,7 @@ function CanvasInner() {
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
           // Group select (drag multiple nodes together):
