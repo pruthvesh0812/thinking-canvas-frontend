@@ -1,6 +1,7 @@
 import { useRef, useState } from "react"
 import { useReactFlow } from "@xyflow/react"
 import { hasSessionChanges, useCanvasStore } from "@/stores/canvas-store"
+import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
 
@@ -18,6 +19,11 @@ export function CanvasFooter() {
   // (CanvasSessionBaseline) — the only thing "I'm done" cares about.
   // Position/resize/bend edits alone never unlock it.
   const sessionChanged = useCanvasStore((s) => hasSessionChanges(s.nodes, s.edges, s.sessionBaseline))
+  // Set-aside show/hide — the toggle only surfaces once at least one AI node
+  // has been set aside (nothing to reveal otherwise).
+  const setAsideCount = useCanvasStore((s) => s.nodes.filter((n) => n.data.setAsideAt).length)
+  const showSetAside = useCanvasUiStore((s) => s.showSetAside)
+  const toggleShowSetAside = useCanvasUiStore((s) => s.toggleShowSetAside)
   const { beginSessionComplete, persistCanvasTitle } = useSessionLifecycle()
 
   // Double-click to rename — unlike original_intent, the title is ordinary
@@ -72,11 +78,26 @@ export function CanvasFooter() {
             {canvasTitle}
           </span>
         )}
-        {/* "show/hide rejected" lived here — removed with the mock store's
-            per-node status (ghost-streaming rewrite). The real ghost-store
-            drops a pair the moment it's decided, so there's nothing client-
-            side left to toggle; a real "rejected" view belongs to
-            ghost-interaction, backed by ai_contributions, not this store. */}
+        {/* Set-aside show/hide — a canvas-level control, so it lives here
+            rather than floating over the pane. (A "show/hide rejected" toggle
+            once sat here too; rejected ghosts aren't persisted client-side, so
+            that view would belong to ghost-interaction/ai_contributions.) */}
+        {setAsideCount > 0 && (
+          <button
+            type="button"
+            onClick={toggleShowSetAside}
+            aria-pressed={showSetAside}
+            className="rounded-full px-[11px] py-1 text-[11.5px]"
+            style={{
+              color: showSetAside ? "#f5f1e8" : "#6B6257",
+              background: showSetAside ? "var(--tc-ink)" : "none",
+              border: "1px solid var(--tc-hairline-strong)",
+              cursor: "pointer",
+            }}
+          >
+            {showSetAside ? "Hide" : "Show"} set aside ({setAsideCount})
+          </button>
+        )}
       </div>
       <button
         type="button"

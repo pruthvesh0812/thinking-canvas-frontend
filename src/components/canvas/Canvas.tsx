@@ -107,7 +107,6 @@ function CanvasInner() {
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
   const backdropColor = useCanvasUiStore((s) => s.backdropColor)
   const showSetAside = useCanvasUiStore((s) => s.showSetAside)
-  const toggleShowSetAside = useCanvasUiStore((s) => s.toggleShowSetAside)
   const relateLegPrompt = useCanvasUiStore((s) => s.relateLegPrompt)
   const setRelateLegPrompt = useCanvasUiStore((s) => s.setRelateLegPrompt)
   const pairs = useGhostStore((s) => s.pairs)
@@ -567,36 +566,8 @@ function CanvasInner() {
           )}
         </ReactFlow>
         {!isHistory && <BackdropSwitcher />}
-        {/* Set-aside toggle — only surfaces once at least one AI node has been
-            set aside. Off by default, so set-aside nodes stay out of the way;
-            flipping it reveals them (muted, labelled) so they can be brought
-            back. */}
-        {!isHistory &&
-          (() => {
-            const setAsideCount = storeNodes.filter((n) => n.data.setAsideAt).length
-            if (setAsideCount === 0) return null
-            return (
-              <button
-                type="button"
-                onClick={toggleShowSetAside}
-                aria-pressed={showSetAside}
-                className="absolute left-4 top-4 z-[8] flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px]"
-                style={{
-                  border: "1px solid var(--tc-node-border)",
-                  background: showSetAside ? "var(--tc-ink)" : "var(--tc-node)",
-                  color: showSetAside ? "#f5f1e8" : "var(--tc-chrome)",
-                  boxShadow: "0 1px 3px rgba(43,38,34,.12)",
-                  cursor: "pointer",
-                  transition: "background .15s ease, color .15s ease",
-                }}
-              >
-                <span aria-hidden>{showSetAside ? "◉" : "◌"}</span>
-                <span>
-                  {showSetAside ? "Hide" : "Show"} set aside ({setAsideCount})
-                </span>
-              </button>
-            )
-          })()}
+        {/* The set-aside show/hide toggle lives in CanvasFooter (a canvas-level
+            control), not floating over the pane. */}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
             <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
