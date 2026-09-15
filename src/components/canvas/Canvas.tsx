@@ -18,25 +18,21 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
-import { useCanvasStore, type CanvasNode } from "@/stores/canvas-store"
+import { useCanvasStore } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
-import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
+import { useGhostStore } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
-import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorPosition, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
-import { RelateAnchorNode, type RelateAnchorFlowNode } from "./nodes/RelateAnchorNode"
 import { GhostContextNode, type GhostContextFlowNode } from "../ghost/GhostContextNode"
 import { GhostQuestionNode, type GhostQuestionFlowNode } from "../ghost/GhostQuestionNode"
 import { LogicalEdge } from "./edges/LogicalEdge"
 import { QuestionEdge } from "./edges/QuestionEdge"
-import { RelateEdge } from "./edges/RelateEdge"
 import { GhostEdge, type GhostEdgeData } from "./edges/GhostEdge"
 
 import { NorthStarHeader } from "./NorthStarHeader"
@@ -54,57 +50,32 @@ const nodeTypes: NodeTypes = {
   humanNode: HumanNode,
   ghostContext: GhostContextNode,
   ghostQuestion: GhostQuestionNode,
-  relateAnchor: RelateAnchorNode,
 }
 
 const edgeTypes: EdgeTypes = {
   logicalEdge: LogicalEdge,
   questionEdge: QuestionEdge,
-  relateEdge: RelateEdge,
   ghostEdge: GhostEdge,
 }
 
-// The React Flow node id a `relate`-triggered pair's midpoint anchor uses —
-// shared by the nodes memo (plants it) and the edges memo (sources the
-// ghost's drop-line from it), so the two never drift out of sync.
-function relateAnchorId(triggerEdgeId: string): string {
-  return `relate-anchor:${triggerEdgeId}`
+// Fixed floating offset for the one seeded ghost pair — matches
+// ThinkingCanvas.dc.html's demo layout. Real spawns will position ghosts
+// relative to their trigger node once more than one scenario exists.
+const GHOST_LAYOUT = {
+  context: { x: 470, y: 552, width: 280 },
+  question: { x: 850, y: 615, width: 250 },
 }
-
-// Resolves a pair's two real endpoint nodes when it was spawned by a
-// `relate` edge — undefined for a node-triggered spawn, or (shouldn't
-// happen) if an anchor id doesn't resolve to a node currently on the
-// canvas. Shared by the nodes and edges memos below.
-function relateEndpoints(pair: GhostPairState, nodesById: Map<string, CanvasNode>): [CanvasNode, CanvasNode] | undefined {
-  if (!pair.triggerEdgeId) return undefined
-  const [a, b] = pair.anchorNodeIds
-  if (!a || !b) return undefined
-  const nodeA = nodesById.get(a)
-  const nodeB = nodesById.get(b)
-  return nodeA && nodeB ? [nodeA, nodeB] : undefined
-}
-
 
 function CanvasInner() {
   const storeNodes = useCanvasStore((s) => s.nodes)
   const storeEdges = useCanvasStore((s) => s.edges)
   const updateNodePosition = useCanvasStore((s) => s.updateNodePosition)
-  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout, setAsideNode, deleteRelateLegs } =
-    useCanvasPersistence()
+  const { persistEdge, requestNodeDelete, requestNodesDelete, persistNodeLayout } = useCanvasPersistence()
   const activePen = useCanvasUiStore((s) => s.activePen)
   const pendingDelete = useCanvasUiStore((s) => s.pendingDelete)
   const canvasBackdrop = useCanvasUiStore((s) => s.canvasBackdrop)
   const backdropColor = useCanvasUiStore((s) => s.backdropColor)
-  const showSetAside = useCanvasUiStore((s) => s.showSetAside)
-  const toggleShowSetAside = useCanvasUiStore((s) => s.toggleShowSetAside)
-  const relateLegPrompt = useCanvasUiStore((s) => s.relateLegPrompt)
-  const setRelateLegPrompt = useCanvasUiStore((s) => s.setRelateLegPrompt)
   const pairs = useGhostStore((s) => s.pairs)
-  const sessionId = useSessionStore((s) => s.sessionId)
-  // The one SSE connection for the whole active session — opened here (once
-  // sessionId is known) and held open for CanvasInner's lifetime; it is
-  // never reconnected per ghost (GHOST-STREAMING.md).
-  useGhostStream(sessionId)
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
@@ -172,7 +143,7 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
+  const { phase, remaining, paused, trigger, reset, togglePause, processNow, revealPair } = useInterventionDemo()
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
   // starts empty, per north-star capture's resetToEmpty()).
@@ -182,16 +153,9 @@ function CanvasInner() {
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
   // yet, and showing it would misrepresent the trail (design brief).
-  // Set-aside (soft-archived) AI nodes are hidden on the LIVE canvas until
-  // the "show set aside" toggle is on. History deliberately ignores set-aside
-  // entirely — a past session shows what stood then, with no imprint of a
-  // later set-aside (the node renders normally in history).
   const visibleStoreNodes = useMemo(
-    () =>
-      isHistory
-        ? storeNodes.filter((n) => n.data.sessionNumber <= viewedSession)
-        : storeNodes.filter((n) => showSetAside || !n.data.setAsideAt),
-    [storeNodes, isHistory, viewedSession, showSetAside],
+    () => (isHistory ? storeNodes.filter((n) => n.data.sessionNumber <= viewedSession) : storeNodes),
+    [storeNodes, isHistory, viewedSession],
   )
 
   // Selecting a past session shows the whole canvas as it stood then — so
@@ -208,6 +172,7 @@ function CanvasInner() {
 
   const nodes = useMemo<Node[]>(() => {
     const humanNodes: HumanFlowNode[] = visibleStoreNodes.map((n) => {
+      const pair = pairs[n.id]
       return {
         id: n.id,
         type: "humanNode",
@@ -216,13 +181,10 @@ function CanvasInner() {
           ...n.data,
           width: n.width,
           height: n.height,
+          onRevealPair: !isHistory && pair && !pair.revealed ? revealPair : undefined,
           dimmed: isHistory && n.data.sessionNumber < viewedSession,
           readOnly: isHistory,
           soloSelected: selectedNodeIds.size === 1 && selectedNodeIds.has(n.id),
-          // Styling/affordance flag — a node reads as "set aside" only on the
-          // live canvas (it's here at all in that case because the toggle is
-          // on). In history it renders normally, so this stays false there.
-          setAside: !isHistory && !!n.data.setAsideAt,
         },
         // Draggable is controlled at the ReactFlow level (nodesDraggable
         // below) so Cmd/Ctrl held can disable it globally — that's how a
@@ -241,33 +203,12 @@ function CanvasInner() {
     // the live canvas's affordances.
     if (isHistory) return humanNodes
 
-    const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
-    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode | RelateAnchorFlowNode)[] = []
+    const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
-      // A `relate`-triggered Articulator pair hangs below the midpoint of
-      // its edge's two endpoints, not next to a single trigger node — and
-      // plants a purely decorative anchor node at that midpoint marking
-      // where the rest-state diamond sat. The ghost's own drop-lines (edges
-      // memo below) run from BOTH endpoints straight to the ghost card, not
-      // from this anchor — React Flow edges need a real node to source from,
-      // and "both nodes point at the ghost" is the actual spec.
-      const endpoints = relateEndpoints(pair, nodesById)
-      const pos = endpoints ? ghostPositionsFromEdge(endpoints) : ghostPositions(nodesById.get(triggerNodeId))
-      if (endpoints && pair.triggerEdgeId) {
-        ghostNodes.push({
-          id: relateAnchorId(pair.triggerEdgeId),
-          type: "relateAnchor",
-          position: relateAnchorPosition(endpoints),
-          data: { triggerNodeId },
-          draggable: false,
-          selectable: false,
-          deletable: false,
-        })
-      }
       ghostNodes.push({
         id: pair.descriptor.context_node.ghost_id,
         type: "ghostContext",
-        position: pos.context,
+        position: { x: GHOST_LAYOUT.context.x, y: GHOST_LAYOUT.context.y },
         data: { triggerNodeId },
         draggable: false,
         // Not draggable, but must stay selectable — React Flow sets
@@ -277,58 +218,40 @@ function CanvasInner() {
         selectable: true,
         // Ghosts are accept/reject only, never deletable (CANVAS-RENDERING.md).
         deletable: false,
-        style: { width: GHOST_WIDTH.context },
+        style: { width: GHOST_LAYOUT.context.width },
       })
-      if (hasQuestionGhost(pair)) {
+      if (pair.question) {
         ghostNodes.push({
-          id: pair.descriptor.question_node!.ghost_id,
+          id: pair.question.ghostId,
           type: "ghostQuestion",
-          position: pos.question,
+          position: { x: GHOST_LAYOUT.question.x, y: GHOST_LAYOUT.question.y },
           data: { triggerNodeId },
           draggable: false,
           selectable: true,
           deletable: false,
-          style: { width: GHOST_WIDTH.question },
+          style: { width: GHOST_LAYOUT.question.width },
         })
       }
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [visibleStoreNodes, pairs, isHistory, viewedSession, selectedNodeIds])
+  }, [visibleStoreNodes, pairs, revealPair, isHistory, viewedSession, selectedNodeIds])
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
-    // A `relate` edge with a pending pair anchored to it is being replaced,
-    // not just annotated — its two ghost drop-lines (below) stand in for it
-    // for as long as the pair is pending, so the original edge is hidden
-    // outright rather than rendered alongside them. Rejecting the pair
-    // removes it from `pairs` with the edge itself untouched, so it simply
-    // reappears; accepting deletes it for good (use-canvas-persistence.ts).
-    const anchoredEdgeIds = isHistory
-      ? new Set<string>()
-      : new Set(Object.values(pairs).flatMap((p) => (p.triggerEdgeId ? [p.triggerEdgeId] : [])))
-    // Any edge touching a set-aside node (visible only while the toggle is on)
-    // reads muted too — it belongs to a note the AI is ignoring, so it
-    // shouldn't sit at full strength among the live edges. Covers both an edge
-    // from a live node into a set-aside one and an edge between two set-aside
-    // nodes. Never in history (set-aside has no imprint there).
-    const setAsideIds = new Set(visibleStoreNodes.filter((n) => n.data.setAsideAt).map((n) => n.id))
     const humanEdges: Edge[] = storeEdges
       // An edge whose other end doesn't exist yet would dangle in the past.
-      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target) && !anchoredEdgeIds.has(e.id))
+      .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
       .map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: e.edgeType === "question" ? "questionEdge" : e.edgeType === "relate" ? "relateEdge" : "logicalEdge",
+        type: e.edgeType === "question" ? "questionEdge" : "logicalEdge",
         // Points at the target end — LogicalEdge/QuestionEdge already thread
         // markerEnd through to BaseEdge, this is what actually turns it on.
         markerEnd: { type: MarkerType.ArrowClosed, color: "#6A6154", width: 16, height: 16 },
-        // Fades the whole edge group (path + arrow) via CSS while keeping it
-        // clickable — see .tc-edge-muted in globals.css.
-        className: !isHistory && (setAsideIds.has(e.source) || setAsideIds.has(e.target)) ? "tc-edge-muted" : undefined,
         // Hover-to-delete is a live-canvas-only affordance, same rule as
         // node delete (CANVAS-RENDERING.md).
         data: { readOnly: isHistory },
@@ -336,53 +259,20 @@ function CanvasInner() {
 
     if (isHistory) return humanEdges
 
-    const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
     const ghostEdges: Edge<GhostEdgeData>[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
-      // A `relate`-triggered pair hangs from BOTH endpoints, not one — the
-      // rest-state edge already runs node→diamond→node, and once a ghost
-      // spawns each endpoint gets its own drop-line straight to the ghost
-      // card (the midpoint anchor node stays purely decorative, marking
-      // where the two lines used to converge). A node-triggered spawn keeps
-      // the single line from its one trigger node.
-      const endpoints = relateEndpoints(pair, nodesById)
-      if (endpoints) {
-        const [a, b] = endpoints
-        // Same side each anchor's now-hidden relate edge left from — the
-        // replacement reads as a swap, not a relayout (ghost-layout.ts).
-        const originalEdge = pair.triggerEdgeId ? storeEdges.find((e) => e.id === pair.triggerEdgeId) : undefined
-        ghostEdges.push(
-          {
-            id: `ge-${a.id}-${pair.descriptor.context_node.ghost_id}`,
-            source: a.id,
-            sourceHandle: relateAnchorSourceHandle(a.id, originalEdge),
-            target: pair.descriptor.context_node.ghost_id,
-            type: "ghostEdge",
-            data: { pairKey: triggerNodeId, slot: "context" },
-          },
-          {
-            id: `ge-${b.id}-${pair.descriptor.context_node.ghost_id}`,
-            source: b.id,
-            sourceHandle: relateAnchorSourceHandle(b.id, originalEdge),
-            target: pair.descriptor.context_node.ghost_id,
-            type: "ghostEdge",
-            data: { pairKey: triggerNodeId, slot: "context" },
-          },
-        )
-      } else {
+      ghostEdges.push({
+        id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
+        source: triggerNodeId,
+        target: pair.descriptor.context_node.ghost_id,
+        type: "ghostEdge",
+        data: { pairKey: triggerNodeId, slot: "context" },
+      })
+      if (pair.question) {
         ghostEdges.push({
-          id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
-          source: triggerNodeId,
-          target: pair.descriptor.context_node.ghost_id,
-          type: "ghostEdge",
-          data: { pairKey: triggerNodeId, slot: "context" },
-        })
-      }
-      if (hasQuestionGhost(pair)) {
-        ghostEdges.push({
-          id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.descriptor.question_node!.ghost_id}`,
+          id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.question.ghostId}`,
           source: pair.descriptor.context_node.ghost_id,
-          target: pair.descriptor.question_node!.ghost_id,
+          target: pair.question.ghostId,
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "question" },
         })
@@ -542,36 +432,6 @@ function CanvasInner() {
           )}
         </ReactFlow>
         {!isHistory && <BackdropSwitcher />}
-        {/* Set-aside toggle — only surfaces once at least one AI node has been
-            set aside. Off by default, so set-aside nodes stay out of the way;
-            flipping it reveals them (muted, labelled) so they can be brought
-            back. */}
-        {!isHistory &&
-          (() => {
-            const setAsideCount = storeNodes.filter((n) => n.data.setAsideAt).length
-            if (setAsideCount === 0) return null
-            return (
-              <button
-                type="button"
-                onClick={toggleShowSetAside}
-                aria-pressed={showSetAside}
-                className="absolute left-4 top-4 z-[8] flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px]"
-                style={{
-                  border: "1px solid var(--tc-node-border)",
-                  background: showSetAside ? "var(--tc-ink)" : "var(--tc-node)",
-                  color: showSetAside ? "#f5f1e8" : "var(--tc-chrome)",
-                  boxShadow: "0 1px 3px rgba(43,38,34,.12)",
-                  cursor: "pointer",
-                  transition: "background .15s ease, color .15s ease",
-                }}
-              >
-                <span aria-hidden>{showSetAside ? "◉" : "◌"}</span>
-                <span>
-                  {showSetAside ? "Hide" : "Show"} set aside ({setAsideCount})
-                </span>
-              </button>
-            )
-          })()}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
             <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
@@ -634,74 +494,6 @@ function CanvasInner() {
             </div>
           </div>
         )}
-
-        {/* Relate-leg delete prompt — a relate articulation's two legs + its
-            AI note are one unit, so deleting a single leg offers the two
-            coherent outcomes instead of silently half-connecting the note:
-            drop both legs (note stays, unlinked) or set the whole note aside
-            (reversible). Raised by requestEdgeDelete via detectRelateArticulation. */}
-        {!isHistory &&
-          relateLegPrompt &&
-          (() => {
-            // Offer "Set the note aside" only when the note isn't already set
-            // aside — for an already-set-aside articulation (its legs are only
-            // reachable at all with the toggle on) that option is a no-op, so
-            // the prompt drops to just Drop-both-links + Cancel.
-            const alreadySetAside = storeNodes.some((n) => n.id === relateLegPrompt.aiNodeId && !!n.data.setAsideAt)
-            return (
-              <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center" style={{ zIndex: 31 }}>
-                <div
-                  className="pointer-events-auto rounded-[10px] p-3.5"
-                  style={{
-                    width: 320,
-                    background: "var(--tc-node)",
-                    border: "1px solid var(--tc-node-border)",
-                    boxShadow: "0 8px 24px rgba(43,38,34,.18)",
-                  }}
-                >
-                  <div className="mb-1 text-[13px] font-semibold" style={{ color: "var(--tc-ink)" }}>
-                    Remove this connection?
-                  </div>
-                  <div className="mb-3 text-[11.5px] leading-[1.5]" style={{ color: "var(--tc-chrome)" }}>
-                    {alreadySetAside
-                      ? "This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays set aside, now unlinked."
-                      : "This AI note ties two ideas together, so it hangs from both. Drop both links and the note stays on the canvas, now unlinked — or set the whole note aside (it leaves the canvas and the AI stops using it; you can restore it anytime)."}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => deleteRelateLegs(relateLegPrompt.legEdgeIds)}
-                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-[#8f3925]"
-                      style={{ border: "none", background: "#a8422e", color: "#fff", cursor: "pointer" }}
-                    >
-                      Drop both links
-                    </button>
-                    {!alreadySetAside && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAsideNode(relateLegPrompt.aiNodeId)
-                          setRelateLegPrompt(null)
-                        }}
-                        className="rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold hover:bg-black/80"
-                        style={{ border: "none", background: "var(--tc-ink)", color: "#f5f1e8", cursor: "pointer" }}
-                      >
-                        Set the note aside
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setRelateLegPrompt(null)}
-                      className="rounded-[7px] px-3 py-1.5 text-[12.5px] hover:bg-black/[.04]"
-                      style={{ border: "1px solid var(--tc-hairline-strong)", background: "transparent", color: "#6b6257", cursor: "pointer" }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
 
         {/* Guarded-delete undo toast (Node Delete UI) — one slot; a second
             delete while this is showing just replaces the label, it never
