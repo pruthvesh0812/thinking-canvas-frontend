@@ -180,14 +180,25 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
       contextEdges,
       ids,
     )
-    // The two edges just materialized above permanently replace the relate
-    // edge this pair spawned from — Canvas.tsx only hid it while pending, so
-    // delete it for real now. But ONLY if materialization actually succeeded:
-    // if the accepted node/edges failed to insert (materializeAcceptedGhost
-    // returns false after logging + rolling back), deleting the relate edge
-    // too would destroy the connection with nothing standing in for it. Leave
-    // it in place so the pair reappears and the user can retry.
-    if (materialized && relateEndpoints && originalRelateEdge) {
+    if (!materialized) {
+      // Context insert failed and rolled itself back — nothing landed on
+      // disk. Do NOT fire ghostStatus(accepted) (a lie to the backend) or
+      // canvasEvent('ghost.accepted', node_ids=[ghost_id]) (backend would
+      // enrich a non-existent node), and do NOT resolve() (the user would
+      // lose the whole pair to a decision that produced nothing). The
+      // relate edge stays in place too, since the delete above is gated on
+      // `materialized`. Reset the pair's decisions so the accept/reject
+      // controls come back on the card and the user can retry.
+      logger.warn("[ghost-interaction] context materialize failed — leaving pair for retry", {
+        triggerNodeId,
+      })
+      useGhostStore.getState().clearDecisions(triggerNodeId)
+      return
+    }
+    // The two edges just materialized permanently replace the relate edge
+    // this pair spawned from — Canvas.tsx only hid it while pending, so
+    // delete it for real now.
+    if (relateEndpoints && originalRelateEdge) {
       await deleteRelateEdge(originalRelateEdge)
     }
   } else if (pair.triggerEdgeId && originalRelateEdge) {

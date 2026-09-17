@@ -64,6 +64,11 @@ interface GhostStore {
    * back afterward to see whether both decisions (or the only one, when
    * there's no question ghost) are now in. */
   recordDecision: (triggerNodeId: string, slot: GhostPairSlot, decision: GhostSlotDecision, reason?: RejectionReason) => void
+  /** Undoes recordDecision for both slots — brings the accept/reject controls
+   * back on the card. Used when a materialize-on-accept attempt failed
+   * (use-canvas-persistence.ts) so the user can retry rather than lose the
+   * pair to a resolve() that would never have anything to enrich. */
+  clearDecisions: (triggerNodeId: string) => void
   /** Removes the pair once its accept/reject decision(s) are complete — the
    * ghost layer's only job after that is to stop rendering it (the real
    * node, if any, now lives in canvas-store). Also used for cleanup when a
@@ -228,6 +233,23 @@ export const useGhostStore = create<GhostStore>()((set) => ({
             ...pair,
             [field]: decision,
             ...(reason ? { rejectionReason: reason } : {}),
+          },
+        },
+      }
+    }),
+
+  clearDecisions: (triggerNodeId) =>
+    set((s) => {
+      const pair = s.pairs[triggerNodeId]
+      if (!pair) return s
+      return {
+        pairs: {
+          ...s.pairs,
+          [triggerNodeId]: {
+            ...pair,
+            contextDecision: undefined,
+            questionDecision: undefined,
+            rejectionReason: undefined,
           },
         },
       }
