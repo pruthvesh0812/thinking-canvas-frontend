@@ -36,6 +36,13 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
   const text = slot === "context" ? pair.contextText : pair.questionText
   const streamed = pair.streamed
   const drawing = !streamed && text === ""
+  // A question `done` confirmed (hasQuestionGhost gates this card on
+  // questionConfirmed) but whose chunks never arrived — lost to a mid-stream
+  // reconnect, since pub/sub has no replay. Show it as a degraded, dismissable
+  // card rather than an empty one the user is asked to accept/reject. If the
+  // transport later replays the chunks (backend Redis Streams + Last-Event-ID),
+  // `text` fills and this heals back to a normal question card on its own.
+  const contentMissing = slot === "question" && streamed && text === ""
   // Set once this slot's own accept/reject call is in — the card keeps
   // rendering (read-only) until the sibling slot decides too, since only a
   // still-pending sibling is why the pair hasn't resolved out already.
@@ -109,6 +116,8 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
               <li key={i}>{reading}</li>
             ))}
           </ol>
+        ) : contentMissing ? (
+          <span style={{ color: "var(--tc-chrome)" }}>The question didn’t load — reconnecting…</span>
         ) : (
           text
         )}
@@ -145,7 +154,22 @@ export function GhostNodeCard({ triggerNodeId, slot, badge, width, minHeight }: 
       </div>
 
       {streamed && !decided && !choosingReason && (
-        appreciation ? (
+        contentMissing ? (
+          // No accept path for content the user never saw — only dismiss, which
+          // reuses the reject flow (no reason: the question was never shown). If
+          // the transport replays the chunks first, this card heals to normal
+          // before the user gets here.
+          <div className="absolute left-[2px] top-full mt-2">
+            <button
+              type="button"
+              className="rounded-full px-3 py-1 text-xs"
+              style={{ background: "var(--tc-surface)", border: "1px dashed rgba(43,38,34,.4)", color: "var(--tc-chrome)" }}
+              onClick={() => decideGhost(triggerNodeId, slot, "rejected")}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : appreciation ? (
           <div className="absolute left-[2px] top-full mt-2">
             <button
               type="button"

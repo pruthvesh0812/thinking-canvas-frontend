@@ -28,6 +28,13 @@ export interface GhostPairState {
   streamed: boolean
   /** Set by `done` — thread_id/turn_index, what POST /api/ghost-status needs. */
   attribution?: { thread_id: string; turn_index: number }
+  /** Set by `done` from `question_ghost_id !== null` — the AUTHORITATIVE signal
+   * that a real question was emitted, independent of whether its chunks
+   * actually arrived. Distinguishes an appreciation that legitimately omitted
+   * `[QUESTION]` (null → false) from a real question whose content was lost to
+   * a mid-stream reconnect (non-null → true, but `questionText` may still be
+   * ""). Undefined until `done`. */
+  questionConfirmed?: boolean
   /** ghost-interaction: the human's per-node call, recorded independently so
    * a mixed outcome (context accepted, question rejected) can wait for both
    * before use-canvas-persistence.ts fires the single ghost-status call that
@@ -64,10 +71,9 @@ interface GhostStore {
    * back afterward to see whether both decisions (or the only one, when
    * there's no question ghost) are now in. */
   recordDecision: (triggerNodeId: string, slot: GhostPairSlot, decision: GhostSlotDecision, reason?: RejectionReason) => void
-  /** Undoes recordDecision for both slots — brings the accept/reject controls
-   * back on the card. Used when a materialize-on-accept attempt failed
-   * (use-canvas-persistence.ts) so the user can retry rather than lose the
-   * pair to a resolve() that would never have anything to enrich. */
+  /** Undoes a pair's recorded decisions without removing the pair — used when
+   * an accepted ghost fails to materialize, so the pair stays pending and its
+   * accept/reject controls return for a retry (use-canvas-persistence.ts). */
   clearDecisions: (triggerNodeId: string) => void
   /** Removes the pair once its accept/reject decision(s) are complete — the
    * ghost layer's only job after that is to stop rendering it (the real
@@ -79,15 +85,30 @@ interface GhostStore {
   reset: () => void
 }
 
-// A question ghost is pre-created in the descriptor for Expander/
-// Stress-Tester/Outer-Sub, but an `appreciation` response never emits
-// [QUESTION] — so it never receives a chunk. Once the pair is fully
-// streamed with nothing accumulated for it, it counts as absent, same as an
-// Articulator's descriptor never having one at all: no card ever renders
-// for it, so nothing will ever decide it (GHOST-STREAMING.md § Content
-// Delivery — "empty question ghost").
+// Whether this pair has a question card at all. The Articulator's descriptor
+// has no question_node; Expander/Stress-Tester/Outer-Sub pre-create one, but an
+// `appreciation` response omits [QUESTION] so no real question is emitted.
+//
+// The existence answer comes from `done`'s `question_ghost_id`, NOT from
+// whether question chunks accumulated. Inferring absence from
+// `questionText === ""` conflated two very different states: an appreciation
+// that legitimately has no question, and a real question whose chunks were lost
+// to a mid-stream EventSource reconnect (pub/sub has no replay). The second
+// case used to make the card — and any chance to decide on it — vanish
+// silently. Trusting `questionConfirmed` keeps that card (GhostNodeCard renders
+// it in a degraded "didn't load" state) instead of dropping the question.
 export function hasQuestionGhost(pair: GhostPairState): boolean {
-  return !!pair.descriptor.question_node && !(pair.streamed && pair.questionText === "")
+  if (!pair.descriptor.question_node) return false // Articulator — never any question
+  // Before `done` the authoritative signal isn't in yet, so show the
+  // pre-created question ghost as it streams (its controls gate on `streamed`).
+  if (!pair.streamed) return true
+  // After `done`: keep the card if EITHER `done` confirmed a question OR chunks
+  // actually arrived. The confirmed-but-empty case is the reconnect loss this
+  // change targets; the OR guards the opposite inconsistency — content arrived
+  // but `done` under-reported `question_ghost_id` — so received text is never
+  // silently dropped either way. Only a genuinely empty appreciation (no
+  // confirmation, no chunks) has no card.
+  return pair.questionConfirmed === true || pair.questionText !== ""
 }
 
 // True when this node is any pending pair's anchor — HumanNode's halo. The
@@ -216,6 +237,10 @@ export const useGhostStore = create<GhostStore>()((set) => ({
             ...pair,
             streamed: true,
             attribution: { thread_id: msg.thread_id, turn_index: msg.turn_index },
+            // Authoritative existence of the question node — trusted over
+            // whether its chunks arrived, so a reconnect that dropped the
+            // question text can't make the card vanish (hasQuestionGhost).
+            questionConfirmed: msg.question_ghost_id !== null,
           },
         },
       }
@@ -242,17 +267,11 @@ export const useGhostStore = create<GhostStore>()((set) => ({
     set((s) => {
       const pair = s.pairs[triggerNodeId]
       if (!pair) return s
-      return {
-        pairs: {
-          ...s.pairs,
-          [triggerNodeId]: {
-            ...pair,
-            contextDecision: undefined,
-            questionDecision: undefined,
-            rejectionReason: undefined,
-          },
-        },
-      }
+      const next = { ...pair }
+      delete next.contextDecision
+      delete next.questionDecision
+      delete next.rejectionReason
+      return { pairs: { ...s.pairs, [triggerNodeId]: next } }
     }),
 
   resolve: (triggerNodeId) =>

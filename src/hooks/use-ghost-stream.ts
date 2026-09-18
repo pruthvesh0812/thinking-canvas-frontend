@@ -22,7 +22,18 @@ export function useGhostStream(sessionId: string | null) {
     const source = new EventSource(`${API_URL}/api/stream/${sessionId}`)
 
     source.onmessage = (e) => {
-      const msg = JSON.parse(e.data) as RedisMessage
+      // A malformed frame — a truncated write, a stray keepalive comment that
+      // arrives as data — must NEVER throw out of this handler: an uncaught
+      // error here tears down the EventSource for the whole session. Parse
+      // defensively and drop the bad frame, same graceful-ignore contract the
+      // `default` branch gives unknown types (non-negotiable #10).
+      let msg: RedisMessage
+      try {
+        msg = JSON.parse(e.data) as RedisMessage
+      } catch {
+        logger.warn("[ghost-stream] unparseable message frame — dropping", { data: e.data })
+        return
+      }
       switch (msg.type) {
         case "spawn":
           useGhostStore.getState().spawn(msg.descriptor)
