@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useGhostStore } from "@/stores/ghost-store"
-import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
+import { MOCK_INTERVENTION, MOCK_INTERVENTION_TEXT } from "@/lib/mock-intervention-scenario"
 import { logger } from "@/lib/logger"
 
 export type InterventionPhase = "idle" | "shimmer" | "waiting" | "generating"
@@ -8,16 +8,20 @@ export type InterventionPhase = "idle" | "shimmer" | "waiting" | "generating"
 const WAITING_SECONDS = 10
 const SHIMMER_MS = 1450
 const GENERATING_MS = 2300
+// Matches the backend's own spawn→chunk sleep (`step.sleep('ghost-animation',
+// '1500ms')`, GHOST-STREAMING.md) — the entrance-animation budget before
+// text starts arriving, kept identical here so the demo choreography still
+// reads true to the real protocol.
 const DRAW_MS = 1500
 const WORD_STEP_MS = 60
 const GAP_BETWEEN_GHOSTS_MS = 450
 
 // Stands in for the real trigger (a debounced node-create pause, or an
-// immediate question-edge draw) that will fire the SSE stream once
-// ghost-streaming lands (GHOST-STREAMING.md). The phase machine and timings
-// below (shimmer → waiting → generating) reproduce
-// ThinkingCanvas.dc.html's demo choreography exactly so the felt experience
-// can be reviewed before any backend wiring exists.
+// immediate question-edge draw) for manual QA of the visual sequence
+// without a live backend. Drives ghost-store through the SAME actions the
+// real use-ghost-stream.ts hook does — spawn, then appendChunk word-by-word,
+// then markDone — so it is a second path feeding the store, not the only
+// one, and the two can run side by side.
 export function useInterventionDemo() {
   const [phase, setPhase] = useState<InterventionPhase>("idle")
   const [remaining, setRemaining] = useState(WAITING_SECONDS)
@@ -45,16 +49,55 @@ export function useInterventionDemo() {
 
   useEffect(() => clearAll, [clearAll])
 
+  // Streams one ghost id's text word-by-word via appendChunk — the exact
+  // store action a real `chunk` message drives, just paced locally instead
+  // of arriving over SSE.
+  const streamGhost = useCallback(
+    (ghostId: string, text: string, onDone: () => void) => {
+      const words = text.split(" ")
+      let i = 0
+      const step = () => {
+        useGhostStore.getState().appendChunk(ghostId, (i === 0 ? "" : " ") + words[i])
+        i++
+        if (i < words.length) {
+          after(WORD_STEP_MS, step)
+        } else {
+          onDone()
+        }
+      }
+      step()
+    },
+    [after],
+  )
+
   const generate = useCallback(() => {
     setPhase("generating")
     after(GENERATING_MS, () => {
-      // The contribution now exists but stays unrendered until the human
-      // hovers the halo (glow-first delivery) — ghost-store tracks that via
-      // `revealed`, not this phase machine.
+      const { trigger_node_id, context_node, question_node } = MOCK_INTERVENTION
       useGhostStore.getState().spawn(MOCK_INTERVENTION)
+      logger.info("[intervention-demo] spawned", { triggerNodeId: trigger_node_id })
+      after(DRAW_MS, () => {
+        streamGhost(context_node.ghost_id, MOCK_INTERVENTION_TEXT.context, () => {
+          after(GAP_BETWEEN_GHOSTS_MS, () => {
+            streamGhost(question_node!.ghost_id, MOCK_INTERVENTION_TEXT.question, () => {
+              // Real `done` carries thread_id/turn_index from Supabase —
+              // the demo has no thread, so these are inert placeholders,
+              // just enough to satisfy markDone's attribution shape.
+              useGhostStore.getState().markDone({
+                type: "done",
+                thread_id: "mock-thread",
+                turn_index: 0,
+                trigger_node_id,
+                context_ghost_id: context_node.ghost_id,
+                question_ghost_id: question_node!.ghost_id,
+              })
+            })
+          })
+        })
+      })
       setPhase("idle")
     })
-  }, [after])
+  }, [after, streamGhost])
 
   const startWaiting = useCallback(() => {
     setPhase("waiting")
@@ -100,54 +143,6 @@ export function useInterventionDemo() {
     generate()
   }, [generate])
 
-  // Streams one ghost node's text word-by-word (drawing → streaming →
-  // pending), matching the 1.5s spawn-animation window from
-  // GHOST-STREAMING.md before content starts arriving.
-  const streamSlot = useCallback(
-    (triggerNodeId: string, slot: "context" | "question", onDone?: () => void) => {
-      const store = useGhostStore.getState()
-      const pair = store.pairs[triggerNodeId]
-      const node = pair?.[slot]
-      if (!node) return
-      store.setStatus(triggerNodeId, slot, "drawing")
-      after(DRAW_MS, () => {
-        store.setStatus(triggerNodeId, slot, "streaming")
-        const words = node.text.split(" ")
-        let i = 0
-        const step = () => {
-          i++
-          store.setDisplayedText(triggerNodeId, slot, words.slice(0, i).join(" "))
-          if (i < words.length) {
-            after(WORD_STEP_MS, step)
-          } else {
-            store.setStatus(triggerNodeId, slot, "pending")
-            onDone?.()
-          }
-        }
-        step()
-      })
-    },
-    [after],
-  )
-
-  // Called when the human hovers the halo — unfolds the ghost pair with the
-  // standard spawn→stream choreography: grounding context first, its
-  // question downstream (CORE-CONCEPTS.md — "ground before nudge").
-  const revealPair = useCallback(
-    (triggerNodeId: string) => {
-      const pair = useGhostStore.getState().pairs[triggerNodeId]
-      if (!pair || pair.revealed) return
-      useGhostStore.getState().reveal(triggerNodeId)
-      logger.info("[intervention-demo] halo revealed", { triggerNodeId })
-      streamSlot(triggerNodeId, "context", () => {
-        if (pair.question) {
-          after(GAP_BETWEEN_GHOSTS_MS, () => streamSlot(triggerNodeId, "question"))
-        }
-      })
-    },
-    [after, streamSlot],
-  )
-
   return {
     phase,
     remaining,
@@ -156,6 +151,5 @@ export function useInterventionDemo() {
     reset,
     togglePause,
     processNow,
-    revealPair,
   }
 }

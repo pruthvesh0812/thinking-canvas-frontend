@@ -6,20 +6,27 @@ status: ui-only-not-connected
 git_branch: "[set at implementation: feature/ghost-interaction-<timestamp>]"
 ---
 
-## Audit Note (2026-08-31)
+## Audit Note (2026-08-31, corrected)
+
+**Correction to this note's first pass:** it claimed this story was still
+blocked on Known Gap #1 (no `thread_id`/`turn_index` on the stream). That
+gap is **resolved** — `API-CONTRACT.md`'s 2026-08-05 sync note and
+`GHOST-STREAMING.md` both confirm `done` now carries `thread_id`/
+`turn_index` directly (no `agent_threads` read needed). This story is not
+backend-blocked at all; it's simply unbuilt.
 
 `GhostControls.tsx` and `RejectionReasonSelector.tsx` exist and drive local
 accept/reject UI, but `materializeGhost` in `use-canvas-persistence.ts` is a
 logged no-op stub (confirmed at the call site) — accept never inserts the
-real `owner:'ai'` node/edge into Supabase. `ghostStatus` in `src/lib/api.ts`
-has zero call sites anywhere in the frontend (grep confirms) — `POST
-/api/ghost-status` is never fired on accept or reject. So the "AI offers,
-human decides" loop only completes visually today; nothing is durable and
-the backend's rejection-insights learning loop never receives a signal.
-Still genuinely blocked on Known Gap #1 (no thread_id/turn_index on the
-stream) for the ghost-status payload — but that gap doesn't block wiring
-`materializeGhost`'s Supabase insert, which could land independently once
-`ghost-streaming` delivers a real (non-demo) pair to accept.
+real `owner:'ai'` node/edge into Supabase, never calls `POST
+/api/ghost-status`, and never fires `POST /api/canvas-event` with
+`event_type:'ghost.accepted'` (API-CONTRACT.md's accept flow, §7.3). `ghostStatus`
+in `src/lib/api.ts` has zero call sites anywhere in the frontend (grep
+confirms). So the "AI offers, human decides" loop only completes visually
+today; nothing is durable and the backend's rejection-insights learning
+loop never receives a signal. Sequenced after `ghost-streaming` only
+because there's no real (non-demo) pair to accept yet — not because of any
+remaining backend gap.
 
 ## What
 The consent threshold: per-node accept/reject controls on streamed pairs, the

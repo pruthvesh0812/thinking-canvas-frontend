@@ -6,23 +6,37 @@ status: ui-only-not-connected
 git_branch: "[set at implementation: feature/ghost-streaming-<timestamp>]"
 ---
 
-## Audit Note (2026-08-31)
+## Audit Note (2026-08-31, corrected)
 
-The rendering target is fully built — `ghost-store.ts`, `GhostContextNode.tsx`,
-`GhostQuestionNode.tsx`, `GhostEdge.tsx`, `DebounceIndicator.tsx`, the
-spawn→animate→stream→done visual sequence — but **the actual SSE consumer
-this story is named for was never built**: `src/hooks/use-ghost-stream.ts`
-and `src/hooks/use-debounce-indicator.ts` don't exist, there is no
-`EventSource` anywhere in the frontend (grep confirms), and `GET
-/api/stream/:sessionId` is never opened. Every ghost pair seen in this app
-today is scripted by `src/hooks/use-intervention-demo.ts`
-(`useGhostStore.getState().spawn(MOCK_INTERVENTION)` on a timer) driving the
-same store the real stream would — `DebounceIndicator` reads that demo
-hook's canned `InterventionPhase`, not a real debounce window. So the
-`[NODE_TYPE:]`/`[QUESTION]`/`[ARTICULATION]` marker-parsing this story's DoD
-requires (Known Gap #6) is unbuilt too — there's no raw stream text to parse
-yet. This can't move until `canvas-core`'s missing `canvas-event` notify is
-wired (the backend has nothing to react to otherwise) — build the real
+**Correction to this note's first pass:** it cited Known Gaps #6/#6b (raw
+marker parsing, reconnect-per-ghost) as still-open blockers — they are not.
+`GHOST-STREAMING.md`'s own 2026-08-05 sync note says both were fixed
+backend-side (`thinking-canvas-api`'s "frontend-contract-holes" story,
+2026-07-19): the backend now pre-splits markers server-side (`chunk`/
+`node_type` messages, pre-routed by ghost id) and holds the SSE connection
+open for the whole session (no reconnect-per-ghost). This story's own text
+below (Files to Touch, Contract Impact, DoD) is what's now stale, not the
+backend. Load `GHOST-STREAMING.md` fresh before implementing — it has the
+current protocol, the exact `useGhostStream` hook to write, and the target
+`GhostPairState`/`GhostStore` shape verbatim.
+
+The rendering target is built but **for the wrong protocol**:
+`ghost-store.ts`'s actual shape today is `MockSpawnDescriptor`-based (full
+ghost text delivered up front, revealed via a typewriter/`displayedText`
+effect on hover) — there is no `appendChunk`/`setNodeType`/`markDone`/
+`attribution`, the shape `GHOST-STREAMING.md` § Ghost Store Shape specifies.
+`src/hooks/use-ghost-stream.ts` and `src/hooks/use-debounce-indicator.ts`
+don't exist; there is no `EventSource` anywhere in the frontend (grep
+confirms), and `GET /api/stream/:sessionId` is never opened. Every ghost
+pair seen in this app today is scripted by
+`src/hooks/use-intervention-demo.ts`
+(`useGhostStore.getState().spawn(MOCK_INTERVENTION)` on a timer) driving
+that mock-shaped store — `DebounceIndicator` reads that demo hook's canned
+`InterventionPhase`, not a real debounce window. **This means the real work
+here is a store rewrite to the chunk-accumulation shape, not just adding a
+hook on top of the existing one.** This can't move until `canvas-core`'s
+missing `canvas-event` notify is wired (the backend has nothing to react to
+otherwise) — build the real
 `use-ghost-stream.ts` hook right after that, reusing the existing store/
 components as the render target; the demo hook can stay for storybook-style
 manual QA of the visual sequence once the real hook exists alongside it.
