@@ -24,3 +24,85 @@ export async function ensureAnonSession(): Promise<User | null> {
   logger.info("[auth] signed in anonymously", { userId: data.user?.id })
   return data.user ?? null
 }
+
+export type AuthResult = { ok: true; needsEmailConfirmation?: boolean } | { ok: false; error: string }
+
+// One redirect target for every OAuth round trip — the callback route
+// (src/app/auth/callback/route.ts) exchanges the code and lands the user
+// back on `next`. Kept here so /login and any future entry point build the
+// same URL shape.
+function callbackUrl(next: string): string {
+  return `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+}
+
+// "Continue with Google" — branches on whether the CURRENT session is
+// anonymous, per ARCHITECTURE.md's Auth Flow:
+//   anonymous  → linkIdentity: attaches Google to the SAME auth.uid(), so
+//                every canvas already written under that anonymous session
+//                carries over with no migration.
+//   permanent, or no session at all → signInWithOAuth: an ordinary sign-in
+//                (or first-time signup) against whatever account Google
+//                resolves to — a different uid than any local anonymous one,
+//                which is the expected trade-off of choosing "sign in" over
+//                "save this session".
+// Both are PKCE redirects; this function only kicks the redirect off; the
+// actual session lands via /auth/callback.
+export async function continueWithGoogle(next = "/"): Promise<AuthResult> {
+  const user = await ensureAnonSession()
+  const options = { redirectTo: callbackUrl(next) }
+  const { error } = user?.is_anonymous
+    ? await supabase.auth.linkIdentity({ provider: "google", options })
+    : await supabase.auth.signInWithOAuth({ provider: "google", options })
+
+  if (error) {
+    logger.error("[auth] Google OAuth redirect failed to start", { error })
+    return { ok: false, error: error.message }
+  }
+  // Success here just means the redirect began — the browser is about to
+  // navigate away, so there's no further local state to set.
+  return { ok: true }
+}
+
+// Email/password conversion or signup, same anonymous-branch reasoning as
+// continueWithGoogle: an anonymous session upgrades in place via
+// updateUser (same uid, keeps every canvas); anything else is a fresh
+// supabase.auth.signUp. Supabase sends a confirmation email either way when
+// the project has email confirmations on — `needsEmailConfirmation` lets the
+// caller show the right copy instead of assuming the session is live yet.
+export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
+  const user = await ensureAnonSession()
+
+  if (user?.is_anonymous) {
+    const { data, error } = await supabase.auth.updateUser({ email, password })
+    if (error) {
+      logger.error("[auth] anonymous→permanent conversion failed", { error })
+      return { ok: false, error: error.message }
+    }
+    logger.info("[auth] converted anonymous session to permanent account", { userId: data.user?.id })
+    // Supabase requires confirming the new email address before it takes
+    // effect on an identity-linking update — the uid (and its canvases)
+    // already belong to this account either way.
+    return { ok: true, needsEmailConfirmation: true }
+  }
+
+  const { data, error } = await supabase.auth.signUp({ email, password })
+  if (error) {
+    logger.error("[auth] sign-up failed", { error })
+    return { ok: false, error: error.message }
+  }
+  logger.info("[auth] signed up", { userId: data.user?.id })
+  return { ok: true, needsEmailConfirmation: !data.session }
+}
+
+// Ordinary sign-in against an existing permanent account — never used for
+// conversion (that always goes through signUpWithEmail/continueWithGoogle),
+// only for the "I already have an account" path on /login.
+export async function signInWithEmail(email: string, password: string): Promise<AuthResult> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) {
+    logger.error("[auth] sign-in failed", { error })
+    return { ok: false, error: error.message }
+  }
+  logger.info("[auth] signed in", { userId: data.user?.id })
+  return { ok: true }
+}

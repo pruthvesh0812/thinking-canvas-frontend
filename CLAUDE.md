@@ -105,7 +105,7 @@ thinking-canvas-web/
 │   │   ├── supabase.ts             # browser client (anon key — RLS is the boundary)
 │   │   ├── api.ts                  # typed fetch wrappers for every backend endpoint
 │   │   └── logger.ts               # structured logging — never console.log directly
-│   └── middleware.ts               # auth gate: session 2+ requires an account
+│   └── proxy.ts                    # auth gate: session 2+ requires an account (Next 16's middleware.ts)
 ├── types/
 │   └── index.ts                    # MIRRORED from backend types/index.ts — never edited by hand
 ├── .ai/
@@ -134,7 +134,7 @@ thinking-canvas-web/
 | Modify ghost pair state | `src/stores/ghost-store.ts` |
 | Understand a backend payload | `types/index.ts` + `.ai/context/API-CONTRACT.md` |
 | Session Complete flow | `src/components/session/` |
-| Auth gate logic | `src/middleware.ts` + `src/lib/supabase.ts` |
+| Auth gate logic | `src/proxy.ts` + `src/lib/supabase.ts` |
 | What the backend expects of the frontend | `.ai/context/API-CONTRACT.md` |
 
 ---

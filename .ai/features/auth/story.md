@@ -2,11 +2,48 @@
 feature: "auth"
 type: story
 created: 2026-07-05
-status: partial
-git_branch: "claude/database-types-frontend-ijktif"
+status: done
+git_branch: "feature/auth-implementation-2026-09-18T1219"
 ---
 
-## Partial Implementation Note (2026-08-09)
+## Closed (2026-09-18)
+
+Both blockers this story was waiting on (canvas-dashboard's real Supabase
+query, session-lifecycle's real `sessionNumber`) had already landed by the
+time this was picked back up — confirmed against the actual code, not
+assumed. Delivered:
+
+- `src/proxy.ts` (Next 16 renamed `middleware.ts` → `proxy.ts`; same
+  convention) — the session-2+ gate on `/canvas/*`, backed by
+  `src/lib/supabase-middleware.ts`'s `@supabase/ssr` server client.
+- `src/app/login/page.tsx` — Google OAuth + email/password, branching on
+  whether the current session is anonymous (convert in place via
+  `linkIdentity`/`updateUser`) or not (ordinary `signInWithOAuth`/
+  `signInWithPassword`/`signUp`).
+- `src/app/auth/callback/route.ts` — the PKCE code-exchange landing point
+  both OAuth paths redirect through.
+- `src/components/auth/SignupPrompt.tsx`, wired into
+  `SessionCompleteModal.tsx`'s screen 3, gated on
+  `session-store.pastSessions.length === 0` (this canvas's first-ever
+  session close) and `is_anonymous`.
+- `src/components/auth/AnonymousAuthGate.tsx`, mounted in the root layout —
+  `useAnonymousAuth` was dead code (unused anywhere) before this; moving it
+  app-wide was safe because `lib/supabase.ts`'s lazy Proxy client (added
+  after this story's 2026-08-09 note) already made importing it build-safe
+  without env vars.
+- `src/lib/auth.ts` gained `continueWithGoogle` / `signUpWithEmail` /
+  `signInWithEmail`.
+
+No backend changes needed — confirmed against `thinking-canvas-be`'s RLS
+migration (`20260609000003_rls_and_indexes.sql`): every policy keys off
+`auth.uid()` with no anonymous/permanent distinction, so identity-linking
+conversion (same uid) needs no RLS change. **Not code, but still required
+before this works in any real environment:** the Supabase project needs the
+Google OAuth provider configured (Client ID/secret, authorized redirect URI
+`<origin>/auth/callback`) in the Supabase dashboard — that's project
+configuration, not something either repo's code can do.
+
+## Partial Implementation Note (2026-08-09) — historical, see Closed above
 
 Only the anonymous sign-in slice has landed — `src/hooks/use-anonymous-auth.ts`,
 called from `CanvasShell` (`src/app/canvas/[canvasId]/canvas-shell.tsx`), not

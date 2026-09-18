@@ -25,7 +25,7 @@ contract impact, and definition of done.
 | 6 | `ghost-interaction` | 🟡 UI-only — accept/reject never persists or reports | Accept/reject, rejection reasons, materialization | 5 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 7 | `session-lifecycle` | ✅ done (v1 simplifications documented in-file) | North star capture, phase toggle, Session Complete, carry-forward | 6 | CORE-CONCEPTS + SESSION-FLOWS |
 | 8 | `canvas-dashboard` | ✅ done | Multi-canvas home, create/open flow | 7 | CORE-CONCEPTS + SESSION-FLOWS |
-| 9 | `auth` | 🟡 partial — anonymous sign-in only; conversion/gate/login unbuilt | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
+| 9 | `auth` | ✅ done (closed 2026-09-18) | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
 | 10 | `billing-and-tiers` | ⬜ not started — settings/login still stub pages | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#5 | ARCHITECTURE + API-CONTRACT |
 | 11 | `observer-structure-ui` | ⬜ not started — **backend-blocked** | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#4 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 12 | `session-selector` | ✅ done (closed 2026-08-31) | Real session history browsing (replaces mock-sessions.ts UI) | 8 | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
@@ -69,10 +69,14 @@ work, in this order:
    (currently unused) once real pairs exist to accept/reject — nothing left
    blocking this backend-side; `thread_id`/`turn_index` come straight off
    `done`.
-5. Only after that loop is real end-to-end does `auth`'s remaining half
-   (signup prompt after Session Complete, `/login`, `middleware.ts` gate) or
-   `billing-and-tiers` become worth starting — both are still genuinely
-   untouched, not next in line yet.
+5. ~~Only after that loop is real end-to-end does `auth`'s remaining half...~~
+   **Superseded 2026-09-18:** steps 1–4 above (canvasEvent notify, real SSE,
+   ghost accept/reject persistence) were confirmed live against the code
+   before this story started — this numbered list had drifted stale. `auth`
+   is now ✅ done (signup prompt, `/login`, the session-2+ gate — see its own
+   row above and `.ai/features/auth/story.md`). `billing-and-tiers` and the
+   backend-blocked `observer-structure-ui` are what's actually next; see
+   the table at the top of this file, not this stale numbered list.
 
 ### Why this order
 
