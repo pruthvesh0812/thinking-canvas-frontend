@@ -20,6 +20,16 @@ const pendingEdgeDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>()
 // a group delete is one action with one undo, not N independent ones.
 const pendingGroupDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// Trigger node ids whose pair is mid-resolution. resolveGhostPair only calls
+// resolve() (which removes the pair) at its very end, so between a decision
+// clearing the "both decided" gate and that final resolve the pair is still in
+// the store fully decided — a rapid second click (two clicks in one frame,
+// before GhostNodeCard re-renders its controls away) would pass the gate again
+// and schedule a SECOND resolveGhostPair, duplicating the Supabase inserts and
+// the ghost-status/canvas-event posts. This set makes resolution fire exactly
+// once per trigger node until it settles.
+const resolvingGhostPairs = new Set<string>()
+
 function nodeDeleteLabel(content: string): string {
   const firstLine = (content.split("\n")[0] ?? "").trim()
   if (!firstLine) return "Untitled node"
@@ -100,7 +110,16 @@ function decideGhost(
   const questionDecided = !questionExists || pair.questionDecision !== undefined
   if (!contextDecided || !questionDecided) return // waiting on the other slot
 
-  void resolveGhostPair(triggerNodeId, pair, questionExists)
+  // Re-entrancy guard (see resolvingGhostPairs): a fast second click that
+  // re-passes the gate above must not schedule resolution twice. Cleared once
+  // resolveGhostPair settles — including the retry path where a failed accept
+  // leaves the pair pending (fix: clearDecisions), so a deliberate later click
+  // can still resolve it.
+  if (resolvingGhostPairs.has(triggerNodeId)) return
+  resolvingGhostPairs.add(triggerNodeId)
+  void resolveGhostPair(triggerNodeId, pair, questionExists).finally(() => {
+    resolvingGhostPairs.delete(triggerNodeId)
+  })
 }
 
 async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, questionExists: boolean) {
@@ -171,8 +190,9 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   //    raw [ARTICULATION n]-tagged stream (GHOST-STREAMING.md § Content
   //    Delivery / ghost-interaction's Contract Impact).
   const contextContent = pair.articulations ? pair.articulations.join("\n\n") : pair.contextText
+  let contextMaterialized = true
   if (contextAccepted) {
-    const materialized = await materializeAcceptedGhost(
+    contextMaterialized = await materializeAcceptedGhost(
       pair.descriptor.context_node.ghost_id,
       contextContent,
       positions.context,
@@ -180,25 +200,14 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
       contextEdges,
       ids,
     )
-    if (!materialized) {
-      // Context insert failed and rolled itself back — nothing landed on
-      // disk. Do NOT fire ghostStatus(accepted) (a lie to the backend) or
-      // canvasEvent('ghost.accepted', node_ids=[ghost_id]) (backend would
-      // enrich a non-existent node), and do NOT resolve() (the user would
-      // lose the whole pair to a decision that produced nothing). The
-      // relate edge stays in place too, since the delete above is gated on
-      // `materialized`. Reset the pair's decisions so the accept/reject
-      // controls come back on the card and the user can retry.
-      logger.warn("[ghost-interaction] context materialize failed — leaving pair for retry", {
-        triggerNodeId,
-      })
-      useGhostStore.getState().clearDecisions(triggerNodeId)
-      return
-    }
-    // The two edges just materialized permanently replace the relate edge
-    // this pair spawned from — Canvas.tsx only hid it while pending, so
-    // delete it for real now.
-    if (relateEndpoints && originalRelateEdge) {
+    // The two edges just materialized above permanently replace the relate
+    // edge this pair spawned from — Canvas.tsx only hid it while pending, so
+    // delete it for real now. But ONLY if materialization actually succeeded:
+    // if the accepted node/edges failed to insert (materializeAcceptedGhost
+    // returns false after logging + rolling back), deleting the relate edge
+    // too would destroy the connection with nothing standing in for it. Leave
+    // it in place so the pair reappears and the user can retry.
+    if (contextMaterialized && relateEndpoints && originalRelateEdge) {
       await deleteRelateEdge(originalRelateEdge)
     }
   } else if (pair.triggerEdgeId && originalRelateEdge) {
@@ -210,6 +219,21 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
     // contextAccepted true and lands in the branch above, not here.)
     await deleteRelateEdge(originalRelateEdge)
   }
+
+  // The user accepted the context ghost but its insert failed
+  // (materializeAcceptedGhost logged + rolled back, returning false), so the
+  // accepted node id now points at nothing. Reporting that acceptance would
+  // make the backend enrich a node that was never written, and resolving
+  // would drop the pair for good — the exact loss the delete-edge guard above
+  // is trying to avoid. Clear this pair's decisions and leave it pending so
+  // its controls return and the user can retry, instead of firing
+  // ghost-status/canvas-event or resolving on a phantom node. (The question
+  // slot, whose edge FK points at this missing context node, is skipped too.)
+  if (contextAccepted && !contextMaterialized) {
+    useGhostStore.getState().clearDecisions(triggerNodeId)
+    return
+  }
+
   if (questionAccepted && pair.descriptor.question_edge) {
     // question_edge.from is the CONTEXT ghost id — if context was rejected
     // (never inserted above), this insert's FK fails and rolls itself back,
@@ -984,16 +1008,49 @@ export function useCanvasPersistence() {
 
   // "Drop both links" outcome of the relate-leg prompt — removes both legs so
   // the AI note stays but hangs unconnected (the user chose this deliberately
-  // in the prompt, so there's no per-edge undo toast). Both go through the
-  // same commit path as a single hover-delete, one Supabase delete each.
-  function deleteRelateLegs(legEdgeIds: string[]) {
+  // in the prompt, so there's no per-edge undo toast). It is ONE all-or-
+  // nothing action, so it persists as a single batched delete with a single
+  // rollback — not two independent commitEdgeDelete calls, where one leg's
+  // delete could fail and restore while the other succeeded, leaving the note
+  // with exactly one of the two links the user asked to drop. Accepted-ghost
+  // legs are always `synced` (materializeAcceptedGhost only adds them to the
+  // store after their insert resolves), so the unsynced branch here is just
+  // defensive: such a leg has no Supabase row and is dropped locally only.
+  async function deleteRelateLegs(legEdgeIds: string[]) {
     const edges = useCanvasStore.getState().edges
     const toDelete = legEdgeIds
       .map((id) => edges.find((e) => e.id === id))
       .filter((e): e is CanvasEdge => !!e)
-    for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+    // Close the prompt regardless — the user acted on it, and if the legs are
+    // already gone (stale prompt, concurrent delete) leaving it open would
+    // strand it with nothing left to do.
     useCanvasUiStore.getState().setRelateLegPrompt(null)
-    void Promise.all(toDelete.map((e) => commitEdgeDelete(e)))
+    if (toDelete.length === 0) return
+    for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+
+    const syncedIds = toDelete.filter((e) => e.synced).map((e) => e.id)
+    if (syncedIds.length === 0) {
+      logger.debug("[persistence] relate legs removed locally only (none synced)", { legEdgeIds })
+      return
+    }
+    if (USE_MOCK_PERSISTENCE) {
+      logger.debug("[persistence] relate legs removed (mock — no Supabase write)", { count: syncedIds.length })
+      return
+    }
+    if (!currentIds()) {
+      logger.error("[persistence] no canvas/session in context — skipping relate-leg delete", { syncedIds })
+      return
+    }
+
+    const { error } = await supabase.from("edges").delete().in("id", syncedIds)
+    if (error) {
+      // All-or-nothing: restore every leg this action removed, not just the
+      // synced ones, so the note keeps both links and the store matches the DB.
+      logger.warn("[persistence] relate-leg delete failed, restoring both legs", { syncedIds, error })
+      for (const e of toDelete) useCanvasStore.getState().restoreEdge(e)
+      return
+    }
+    logger.info("[persistence] relate legs deleted from Supabase", { syncedIds })
   }
 
   // Set aside (soft-archive) — only ever an accepted AI node. Reversible, so
