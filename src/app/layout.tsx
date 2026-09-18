@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Source_Sans_3, Caveat } from "next/font/google";
 import { AnonymousAuthGate } from "@/components/auth/AnonymousAuthGate";
+import { PostAuthRedirect } from "@/components/auth/PostAuthRedirect";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -45,6 +46,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <AnonymousAuthGate />
+        <PostAuthRedirect />
         {children}
       </body>
     </html>

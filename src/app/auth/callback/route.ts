@@ -14,7 +14,13 @@ import type { Database } from "@/types/database.types"
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
-  const next = searchParams.get("next") ?? "/"
+  // Always "/" — this URL must match thinking-canvas-be's supabase/config.toml
+  // `additional_redirect_urls` EXACTLY (no query string), or Supabase's local
+  // GoTrue rejects it and silently falls back to `site_url` instead, bouncing
+  // the whole flow to whatever else is running on that port. `next` travels
+  // via sessionStorage instead (lib/auth.ts's continueWithGoogle) — read back
+  // by PostAuthRedirect.tsx once this lands the user on "/".
+  const next = "/"
 
   if (!code) {
     logger.warn("[auth-callback] no code param on callback request")

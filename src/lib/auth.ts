@@ -27,13 +27,22 @@ export async function ensureAnonSession(): Promise<User | null> {
 
 export type AuthResult = { ok: true; needsEmailConfirmation?: boolean } | { ok: false; error: string }
 
-// One redirect target for every OAuth round trip — the callback route
-// (src/app/auth/callback/route.ts) exchanges the code and lands the user
-// back on `next`. Kept here so /login and any future entry point build the
-// same URL shape.
-function callbackUrl(next: string): string {
-  return `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+// The one redirect target for every OAuth round trip — deliberately NO
+// query string. Supabase's redirect allow-list (thinking-canvas-be's
+// supabase/config.toml `additional_redirect_urls`) matches this URL
+// EXACTLY; appending `?next=...` here makes it stop matching, and Supabase
+// silently falls back to `site_url` instead — landing the user on whatever
+// else happens to be running on that port (learned the hard way: local dev
+// often shares one Supabase instance across projects, and a query-string
+// mismatch bounced this flow into an unrelated app entirely). `next` is
+// carried through sessionStorage instead — see continueWithGoogle below.
+function callbackUrl(): string {
+  return `${window.location.origin}/auth/callback`
 }
+
+// Shared with components/auth/PostAuthRedirect.tsx, the other half of this
+// handoff — exported so the two never drift to different key strings.
+export const POST_AUTH_REDIRECT_KEY = "tc-post-auth-redirect"
 
 // "Continue with Google" — branches on whether the CURRENT session is
 // anonymous, per ARCHITECTURE.md's Auth Flow:
@@ -46,10 +55,20 @@ function callbackUrl(next: string): string {
 //                which is the expected trade-off of choosing "sign in" over
 //                "save this session".
 // Both are PKCE redirects; this function only kicks the redirect off; the
-// actual session lands via /auth/callback.
+// actual session lands via /auth/callback. `next` can't travel as a query
+// param on `redirectTo` (see callbackUrl's comment) — sessionStorage
+// survives the round trip to Google and back on the same browser, which a
+// server-set cookie or the URL both would too, but this is the least
+// machinery for a same-tab redirect. /auth/callback falls back to "/" if
+// it's missing (a fresh tab, or the user cleared storage mid-flow).
 export async function continueWithGoogle(next = "/"): Promise<AuthResult> {
   const user = await ensureAnonSession()
-  const options = { redirectTo: callbackUrl(next) }
+  try {
+    sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, next)
+  } catch {
+    // Private-window/blocked storage — non-fatal, just lands on "/" instead.
+  }
+  const options = { redirectTo: callbackUrl() }
   const { error } = user?.is_anonymous
     ? await supabase.auth.linkIdentity({ provider: "google", options })
     : await supabase.auth.signInWithOAuth({ provider: "google", options })
