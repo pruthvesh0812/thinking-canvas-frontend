@@ -9,6 +9,13 @@ import { logger } from "@/lib/logger"
 
 type Mode = "create" | "signin"
 
+// The same underline-only field the north-star page uses (canvas/new) — no
+// box, just a hairline that darkens to ink on focus, and an italic quiet
+// placeholder.
+const INPUT_CLASS =
+  "w-full border-0 border-b border-b-[#D8CFBE] bg-transparent py-2 text-[16px] outline-none transition-colors " +
+  "placeholder:italic placeholder:text-[var(--tc-chrome-faint)] focus:border-b-[var(--tc-ink)]"
+
 // useSearchParams needs a Suspense boundary above it in the App Router or
 // `next build` fails prerendering this route — the form is the only part
 // that reads the query string, so it's the only part inside the boundary.
@@ -154,94 +161,143 @@ function LoginForm() {
       : "Sign in to continue."
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-8 py-16">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
-        <p className="text-zinc-600 dark:text-zinc-400">{subhead}</p>
+    <main className="tc-scope flex min-h-screen flex-col" style={{ background: "var(--tc-surface)" }}>
+      <div className="px-10 py-7">
+        <Link href="/" className="text-[12.5px] hover:underline" style={{ color: "var(--tc-chrome-quiet)" }}>
+          ← canvases
+        </Link>
       </div>
 
-      {mode === "signin" && isAnonymous && (
-        <p className="text-sm text-zinc-500">
-          Signing in switches you to your account. Anything you started as a guest on this device stays behind — it
-          isn&rsquo;t merged in.
-        </p>
-      )}
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-20">
+        <div
+          className="flex w-full max-w-[400px] flex-col gap-[22px]"
+          style={{ animation: "tc-fadeup .25s ease-out both" }}
+        >
+          <div className="flex flex-col gap-2.5">
+            <span style={{ fontFamily: "var(--font-tc-hand)", fontSize: 19, color: "var(--tc-chrome-faint)" }}>
+              ThinkingCanvas
+            </span>
+            <h1 className="text-[32px] font-semibold leading-[1.25]" style={{ color: "var(--tc-ink)" }}>
+              {heading}
+            </h1>
+            <p className="text-[13.5px] leading-[1.6]" style={{ color: "var(--tc-chrome)" }}>
+              {subhead}
+            </p>
+          </div>
 
-      {pendingEmail && (
-        <p className="rounded-lg bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          A confirmation link is waiting at {pendingEmail}.{" "}
-          <Link href="/account" className="underline underline-offset-2">
-            Check its status
-          </Link>
-        </p>
-      )}
+          {mode === "signin" && isAnonymous && (
+            <p className="text-[12.5px] leading-[1.6]" style={{ color: "var(--tc-chrome-quiet)" }}>
+              Signing in switches you to your account. Anything you started as a guest on this device stays behind
+              — it isn&rsquo;t merged in.
+            </p>
+          )}
 
-      <button
-        type="button"
-        onClick={() => void handleGoogle()}
-        disabled={submitting}
-        className="rounded-full border border-zinc-300 px-5 py-2.5 text-sm font-medium disabled:opacity-60 dark:border-zinc-700"
-      >
-        Continue with Google
-      </button>
+          {pendingEmail && (
+            <p
+              className="rounded-xl px-4 py-3 text-[12.5px] leading-[1.6]"
+              style={{
+                background: "var(--tc-panel)",
+                border: "1px solid var(--tc-panel-border)",
+                color: "var(--tc-chrome)",
+              }}
+            >
+              A confirmation link is waiting at {pendingEmail}.{" "}
+              <Link href="/account" className="underline underline-offset-2" style={{ color: "var(--tc-ink)" }}>
+                Check its status
+              </Link>
+            </p>
+          )}
 
-      <div className="flex items-center gap-3 text-xs text-zinc-500">
-        <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-        or
-        <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-      </div>
-
-      <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-3">
-        <input
-          type="email"
-          required
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700"
-        />
-        {mode === "signin" && (
-          <input
-            type="password"
-            required
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700"
-          />
-        )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {unconfirmedEmail && (
           <button
             type="button"
-            onClick={() => void handleResend()}
+            onClick={() => void handleGoogle()}
             disabled={submitting}
-            className="self-start text-sm text-zinc-600 underline underline-offset-2 disabled:opacity-60 dark:text-zinc-400"
+            className="rounded-full px-5 py-[11px] text-[14.5px] font-semibold transition-colors hover:bg-[#F5F0E4] disabled:opacity-60"
+            style={{
+              border: "1px solid var(--tc-hairline-strong)",
+              background: "var(--tc-panel)",
+              color: "var(--tc-ink)",
+            }}
           >
-            Resend confirmation email
+            Continue with Google
           </button>
-        )}
-        {notice && <p className="text-sm text-emerald-700 dark:text-emerald-400">{notice}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
-        >
-          {submitting ? "…" : mode === "create" ? "Email me a confirmation link" : "Sign in"}
-        </button>
-      </form>
 
-      <button
-        type="button"
-        onClick={() => {
-          setMode((m) => (m === "create" ? "signin" : "create"))
-          setError(null)
-          setNotice(null)
-        }}
-        className="text-sm text-zinc-600 underline underline-offset-2 dark:text-zinc-400"
-      >
-        {mode === "create" ? "Already have an account? Sign in" : "New here? Create an account"}
-      </button>
+          <div className="flex items-center gap-3 text-[12px]" style={{ color: "var(--tc-chrome-faint)" }}>
+            <div className="h-px flex-1" style={{ background: "var(--tc-hairline)" }} />
+            or
+            <div className="h-px flex-1" style={{ background: "var(--tc-hairline)" }} />
+          </div>
+
+          <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-[18px]">
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={INPUT_CLASS}
+              style={{ color: "var(--tc-ink)" }}
+            />
+            {mode === "signin" && (
+              <input
+                type="password"
+                required
+                autoComplete="current-password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={INPUT_CLASS}
+                style={{ color: "var(--tc-ink)" }}
+              />
+            )}
+
+            {error && (
+              <p className="text-[12.5px] leading-[1.6]" style={{ color: "#B4472E" }}>
+                {error}
+              </p>
+            )}
+            {unconfirmedEmail && (
+              <button
+                type="button"
+                onClick={() => void handleResend()}
+                disabled={submitting}
+                className="self-start text-[12.5px] underline underline-offset-2 disabled:opacity-60"
+                style={{ border: "none", background: "none", padding: 0, color: "var(--tc-chrome)" }}
+              >
+                Resend confirmation email
+              </button>
+            )}
+            {notice && (
+              <p className="text-[13px] leading-[1.6]" style={{ color: "var(--tc-ink)" }}>
+                {notice}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-1 self-start rounded-full px-[26px] py-[11px] text-[14.5px] font-semibold transition-opacity disabled:opacity-60"
+              style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8" }}
+            >
+              {submitting ? "…" : mode === "create" ? "Email me a confirmation link" : "Sign in"}
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode((m) => (m === "create" ? "signin" : "create"))
+              setError(null)
+              setNotice(null)
+            }}
+            className="self-start text-[12.5px] underline underline-offset-2"
+            style={{ border: "none", background: "none", padding: 0, color: "var(--tc-chrome-quiet)" }}
+          >
+            {mode === "create" ? "Already have an account? Sign in" : "New here? Create an account"}
+          </button>
+        </div>
+      </div>
     </main>
   )
 }

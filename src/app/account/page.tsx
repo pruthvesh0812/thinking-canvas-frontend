@@ -127,17 +127,18 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
+// Palette-only: amber is reserved for the AI intervention (design tokens),
+// and the interface has no green — so "verified" is the solid quiet pill and
+// "pending / not verified" is the same shape drawn as a dashed outline, i.e.
+// "not settled yet". Only errors get the app's one warm red.
 function Pill({ tone, children }: { tone: "ok" | "warn" | "quiet"; children: React.ReactNode }) {
-  const palette = {
-    ok: { bg: "#E3EEDD", fg: "#3C6B2E" },
-    warn: { bg: "#F4E7CB", fg: "var(--tc-amber-ink-strong)" },
-    quiet: { bg: "rgba(43,38,34,.07)", fg: "var(--tc-chrome)" },
+  const style = {
+    ok: { background: "#EFE8D9", border: "1px solid transparent", color: "var(--tc-ink)" },
+    warn: { background: "none", border: "1px dashed var(--tc-chrome-quiet)", color: "var(--tc-chrome)" },
+    quiet: { background: "rgba(43,38,34,.07)", border: "1px solid transparent", color: "var(--tc-chrome)" },
   }[tone]
   return (
-    <span
-      className="rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold"
-      style={{ background: palette.bg, color: palette.fg }}
-    >
+    <span className="rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold" style={style}>
       {children}
     </span>
   )
@@ -227,7 +228,7 @@ function IdentityCard({ user }: { user: User }) {
             <span className="text-[15px] font-semibold" style={{ color: "var(--tc-ink)" }}>
               {user.email}
             </span>
-            {verified ? <Pill tone="ok">Verified</Pill> : <Pill tone="warn">Not verified</Pill>}
+            {verified ? <Pill tone="ok">✓ Verified</Pill> : <Pill tone="warn">Not verified</Pill>}
           </div>
           {!verified && user.email && (
             <>
@@ -253,7 +254,7 @@ function IdentityCard({ user }: { user: User }) {
         </>
       )}
       {message && (
-        <p className="text-[12.5px]" style={{ color: message.tone === "ok" ? "#3C6B2E" : "#B4472E" }}>
+        <p className="text-[12.5px]" style={{ color: message.tone === "ok" ? "var(--tc-ink)" : "#B4472E" }}>
           {message.text}
         </p>
       )}
@@ -312,7 +313,7 @@ function PasswordCard() {
         </button>
       </form>
       {message && (
-        <p className="text-[12.5px]" style={{ color: message.tone === "ok" ? "#3C6B2E" : "#B4472E" }}>
+        <p className="text-[12.5px]" style={{ color: message.tone === "ok" ? "var(--tc-ink)" : "#B4472E" }}>
           {message.text}
         </p>
       )}
