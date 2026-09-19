@@ -122,7 +122,7 @@ work, in this order:
 
 | Gap | Blocks | Action |
 |---|---|---|
-| #1 no auth on any `/api/*` route or the SSE stream | all stories (any origin-bypassing client can post events / read a stream by uuid) | backend should verify a Supabase JWT; token query-param for EventSource |
+| #1 ~~no auth on `/api/*`~~ — **JWT now required and sent by the frontend (2026-09-19)**; still open: routes verify the token but not that the caller *owns* the canvas/session in the request | any signed-in user (a guest counts) who knows a canvas uuid can post events for it / read its stream | backend compares the verified `userId` to the canvas's `user_id` |
 | #2 free tier still gets Outer-Sub on question edges (tier only checked in the debounced pipeline) | story 10 (UpgradePrompt logic) | don't gate the question-edge UI on tier until backend gates the pipeline too |
 | #3 `carry_forward_ids` accepted by the schema, ignored by the pipeline | story 7 (session-lifecycle's Carry Forward screen) | backend should wire it into session-complete, or drop it from the schema until built |
 | #4 no `observer-edge-status` route (schema exists, no route) | story 11 | backend adds the route + a structure read path |

@@ -25,6 +25,19 @@ export async function ensureAnonSession(): Promise<User | null> {
   return data.user ?? null
 }
 
+// The Supabase access token the backend wants on every /api/* call
+// (thinking-canvas-be's requireAuth verifies it against the Auth server).
+// getSession() hands back the cached session and transparently refreshes it
+// when it's near expiry, so callers never hold a stale token across a long
+// session. Goes through ensureAnonSession first so a call made before the
+// guest session exists (first paint, right after sign-out) still gets one
+// rather than sending nothing and eating a 401.
+export async function getAccessToken(): Promise<string | null> {
+  await ensureAnonSession()
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token ?? null
+}
+
 export type AuthResult =
   | { ok: true; needsEmailConfirmation?: boolean }
   | { ok: false; error: string; code?: string }

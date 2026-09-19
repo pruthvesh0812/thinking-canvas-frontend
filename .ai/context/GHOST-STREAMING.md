@@ -141,7 +141,11 @@ there are no markers left in it to strip.
 export function useGhostStream(sessionId: string | null) {
   useEffect(() => {
     if (!sessionId) return
-    const source = new EventSource(`${API_URL}/api/stream/${sessionId}`)
+    // Simplified — the real hook (src/hooks/use-ghost-stream.ts) fetches the
+    // access token async, passes it as `?token=` (EventSource can't set an
+    // Authorization header; every /api/* route requires it), and reopens with
+    // a fresh token when the browser gives up after a 401 on reconnect.
+    const source = new EventSource(`${API_URL}/api/stream/${sessionId}?token=${token}`)
 
     source.onmessage = (e) => {
       const msg = JSON.parse(e.data) as RedisMessage

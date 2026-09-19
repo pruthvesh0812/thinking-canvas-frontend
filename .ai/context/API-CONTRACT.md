@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-08-05
-verified-against: thinking-canvas-api commit 21d9ac4 — src/routes/*, src/index.ts (route mounting), src/streaming/*, types/index.ts (actual implemented code + its own .ai/context/FRONTEND-CONTRACT.md, not design docs)
+last-verified: 2026-09-19 (auth section only — the rest is as of 2026-08-05)
+verified-against: thinking-canvas-api commit 21d9ac4 + src/lib/auth.ts / src/index.ts (requireAuth, 2026-09-19) — src/routes/*, src/index.ts (route mounting), src/streaming/*, types/index.ts (actual implemented code + its own .ai/context/FRONTEND-CONTRACT.md, not design docs)
 stale-after-days: 30
 ---
 
@@ -49,9 +49,21 @@ must write `edge_type` and `both_existing` correctly *before* notifying.
 
 CORS on the backend is locked to exactly one origin (`FRONTEND_URL`). If SSE or
 fetches fail cross-origin, the backend env var is wrong — not a frontend bug.
-There is **no auth** on any `/api/*` route today (Known Gap #1) — CORS is the
-only guard. Don't bake "no auth headers" deep into the client; isolate it in
-`src/lib/api.ts` so adding a Supabase JWT later touches one file.
+**Every `/api/*` route requires the caller's Supabase access token** (Known Gap
+#1 — closed backend-side; `src/lib/auth.ts` `requireAuth`, mounted on
+`app.use('/api/*')`). It's verified against the Auth server, so a revoked or
+expired token is rejected. POSTs send `Authorization: Bearer <access_token>`
+(attached in `src/lib/api.ts`'s `post()` — the one place every POST goes
+through, token via `getAccessToken()` in `src/lib/auth.ts`). `EventSource`
+can't set headers, so `GET /api/stream/:sessionId` takes `?token=<access_token>`
+instead. A missing/invalid token is `401 {"error":"unauthorized"}`.
+
+The token is checked at **connect time only** and the browser's own
+auto-reconnect reuses the same URL — so an expired token turns a reconnect into
+a 401 and the browser gives up permanently. `use-ghost-stream.ts` handles it:
+when the source is CLOSED it reopens with a freshly fetched token (with
+backoff). Note the backend checks the token is *valid*, not that the
+`canvas_id`/`session_id` in the body belong to that user — see Known Gap #1.
 
 ---
 
@@ -243,7 +255,7 @@ above) and removed; numbers below aren't renumbered to fill the gap.
 
 | # | Severity | Gap | Impact | Direction |
 |---|---|---|---|---|
-| 1 | P1 | No auth on any `/api/*` route or the SSE stream | Any origin-bypassing client can post events / read a session's stream by uuid | Backend should verify a Supabase JWT on all routes; token query-param for EventSource |
+| 1 | P1 | ~~No auth on any `/api/*` route~~ **JWT now required** (2026-09-19 — frontend sends it; see above). **Still open:** the routes only verify the token is valid, they don't check the caller *owns* the `canvas_id`/`session_id` in the request | Any signed-in user (a guest counts) who knows another canvas's uuid can post events for it or read its session stream | Backend should compare `userId` (already set on the Hono context) to the canvas's `user_id` before acting |
 | 2 | P1 | Free tier reaches Outer Subconscious via question edges — tier is only checked in the debounced pipeline, not `outer-sub-pipeline.ts` | A tier-driven `UpgradePrompt` on question edges would be wrong; don't gate that affordance on tier | Backend should gate the immediate pipelines by tier too (or intentionally make Outer-Sub free and document it) |
 | 3 | P1 | `carry_forward_ids` accepted by the schema, ignored by the pipeline | The "Carry Forward" screen can't rely on it persisting anything | Backend should wire it into session-complete, or drop it from the schema until built |
 | 4 | P2 | `observerEdgeStatusSchema` exists in `types/index.ts` but **no route implements it** | Per-edge Observer accept/reject UI has nothing to call | Backend must add `POST /api/observer-edge-status` |
