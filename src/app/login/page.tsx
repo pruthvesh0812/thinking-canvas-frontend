@@ -35,7 +35,11 @@ function LoginForm() {
   // longer have, so open on the sign-in form with a confirmation line.
   const signedOut = searchParams.get("signedOut") === "1"
 
-  const [mode, setMode] = useState<Mode>(signedOut ? "signin" : "create")
+  // A returning user whose Google account already exists lands here from the
+  // callback with error=identity_exists — sign-in is the only thing that will
+  // work for them, so open on it.
+  const identityExists = redirectError === "identity_exists"
+  const [mode, setMode] = useState<Mode>(signedOut || identityExists ? "signin" : "create")
   const [isAnonymous, setIsAnonymous] = useState<boolean | null>(null)
   // An anonymous user who already asked for a confirmation link and hasn't
   // clicked it yet — Supabase parks the address in `new_email`. Shown as a
@@ -52,7 +56,11 @@ function LoginForm() {
   // there's nothing asynchronous to synchronize, just a redirect param to
   // read once. mode/email/etc. below can still overwrite it afterward.
   const [error, setError] = useState<string | null>(
-    redirectError ? "That didn't go through — try again." : null,
+    identityExists
+      ? "That Google account already has a ThinkingCanvas account. Use Continue with Google to sign in to it."
+      : redirectError
+        ? "That didn't go through — try again."
+        : null,
   )
   const [notice, setNotice] = useState<string | null>(signedOut ? "You've been signed out." : null)
 
@@ -79,7 +87,7 @@ function LoginForm() {
   async function handleGoogle() {
     setSubmitting(true)
     setError(null)
-    const result = await continueWithGoogle(next)
+    const result = await continueWithGoogle(next, mode)
     if (!result.ok) {
       setError(result.error)
       setSubmitting(false)
@@ -99,6 +107,13 @@ function LoginForm() {
 
     setSubmitting(false)
     if (!result.ok) {
+      if (result.code === "email_exists") {
+        // Create mode hit an address that already has an account — the fix is
+        // to sign in, not to retry.
+        setMode("signin")
+        setError("That email already has an account — sign in with your password instead.")
+        return
+      }
       setError(result.error)
       if (result.code === "email_not_confirmed") setUnconfirmedEmail(email)
       return
@@ -144,6 +159,13 @@ function LoginForm() {
         <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
         <p className="text-zinc-600 dark:text-zinc-400">{subhead}</p>
       </div>
+
+      {mode === "signin" && isAnonymous && (
+        <p className="text-sm text-zinc-500">
+          Signing in switches you to your account. Anything you started as a guest on this device stays behind — it
+          isn&rsquo;t merged in.
+        </p>
+      )}
 
       {pendingEmail && (
         <p className="rounded-lg bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">

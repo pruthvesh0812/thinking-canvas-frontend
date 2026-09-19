@@ -76,8 +76,20 @@ export const POST_AUTH_REDIRECT_KEY = "tc-post-auth-redirect"
 // server-set cookie or the URL both would too, but this is the least
 // machinery for a same-tab redirect. /auth/callback falls back to "/" if
 // it's missing (a fresh tab, or the user cleared storage mid-flow).
-export async function continueWithGoogle(next = "/"): Promise<AuthResult> {
-  const user = await ensureAnonSession()
+//
+// `intent` is what the person chose on /login, and it wins over what session
+// they happen to hold:
+//   'create' — "save this guest session": link Google onto it (see above).
+//   'signin' — "I already have an account": ALWAYS an ordinary sign-in, never
+//              a link. A returning user who arrives as a fresh guest (new
+//              browser, cleared storage, signed out) still holds an anonymous
+//              session, and linking their EXISTING Google account onto that
+//              new guest fails with `identity_already_exists` — the identity
+//              belongs to their real account. Signing in swaps the session
+//              for that account; the throwaway guest (and anything it made)
+//              is left behind, not merged.
+export async function continueWithGoogle(next = "/", intent: "create" | "signin" = "create"): Promise<AuthResult> {
+  const user = intent === "create" ? await ensureAnonSession() : null
   try {
     sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, next)
   } catch {
@@ -125,7 +137,7 @@ export async function signUpWithEmail(email: string): Promise<AuthResult> {
   const { data, error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: callbackUrl() })
   if (error) {
     logger.error("[auth] anonymous→permanent conversion failed to start", { error })
-    return { ok: false, error: error.message }
+    return { ok: false, error: error.message, code: error.code }
   }
 
   // Ask Supabase what actually happened instead of assuming a link was sent.

@@ -23,8 +23,16 @@ export async function GET(request: NextRequest) {
   const next = "/"
 
   if (!code) {
-    logger.warn("[auth-callback] no code param on callback request")
-    return NextResponse.redirect(`${origin}/login?error=missing_code`)
+    // Supabase reports a failed OAuth round trip by redirecting here with
+    // ?error=…&error_code=… instead of a code. The one worth telling the user
+    // about specifically: `identity_already_exists` — they asked to LINK a
+    // Google account that already belongs to a real account (a returning user
+    // who arrived as a fresh guest). "Try again" would fail identically; the
+    // login page explains and switches to sign-in instead.
+    const errorCode = searchParams.get("error_code")
+    logger.warn("[auth-callback] no code on callback request", { errorCode })
+    const reason = errorCode === "identity_already_exists" ? "identity_exists" : "missing_code"
+    return NextResponse.redirect(`${origin}/login?error=${reason}`)
   }
 
   const cookieStore = await cookies()

@@ -79,6 +79,26 @@ configuration, not something either repo's code can do.
   `getUser()` can lose that race (stale "Create your account" heading right
   after sign-out; a dead-end error on a first-ever `/account` visit).
 
+## Addendum (2026-09-19) — returning user arriving as a guest
+
+Everyone gets a throwaway guest session first (`AnonymousAuthGate`), so a
+returning user with an existing account who opens a fresh browser / cleared
+storage / just signed out starts as a NEW anonymous uid — the app cannot know
+they have an account until they authenticate. Signing in **swaps** the session
+for their account; the guest and anything it made is left behind, not merged
+(merging would need a backend/service-role step; `/login` says so in sign-in
+mode).
+- Google: `continueWithGoogle(next, intent)` — intent `'signin'` always uses
+  `signInWithOAuth`. Only `'create'` (save this guest) uses `linkIdentity`, and
+  linking a Google identity that already belongs to a real account fails with
+  `identity_already_exists`. `/auth/callback` now maps that error to
+  `/login?error=identity_exists`, which opens on sign-in with an explanation
+  (it used to flatten every OAuth error to a generic "try again" that would
+  fail identically forever).
+- Email: `updateUser({ email })` on an address that already has an account
+  returns `email_exists`; `/login` switches to sign-in instead of showing a raw
+  error.
+
 ## Partial Implementation Note (2026-08-09) — historical, see Closed above
 
 Only the anonymous sign-in slice has landed — `src/hooks/use-anonymous-auth.ts`,
