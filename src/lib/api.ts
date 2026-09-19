@@ -31,9 +31,11 @@ export class ApiError extends Error {
 // wrapper below stays one honest line of intent. Every /api/* route requires
 // the caller's Supabase access token as a Bearer header (API-CONTRACT.md
 // Known Gap #1, closed backend-side) — attached here, in the one place every
-// POST goes through. If there's somehow no token we still send the request:
-// the backend's 401 gets logged like any other failure, which beats a
-// silent client-side skip.
+// POST goes through. The backend also checks the ids in the body belong to
+// that user (403 otherwise); we only ever send ids from our own RLS-scoped
+// reads, so a 403 here means a stale tab or account mismatch. If there's
+// somehow no token we still send the request: the backend's 401 gets logged
+// like any other failure, which beats a silent client-side skip.
 async function post<T>(path: string, body: unknown): Promise<T> {
   const token = await getAccessToken()
   const res = await fetch(`${API_URL}${path}`, {

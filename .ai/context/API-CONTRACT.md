@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-09-19 (auth section only — the rest is as of 2026-08-05)
-verified-against: thinking-canvas-api commit 21d9ac4 + src/lib/auth.ts / src/index.ts (requireAuth, 2026-09-19) — src/routes/*, src/index.ts (route mounting), src/streaming/*, types/index.ts (actual implemented code + its own .ai/context/FRONTEND-CONTRACT.md, not design docs)
+last-verified: 2026-09-19 (auth + ownership section only — the rest is as of 2026-08-05)
+verified-against: thinking-canvas-api commit 21d9ac4 + src/lib/auth.ts / src/lib/ownership.ts / src/index.ts (requireAuth + ownership, 2026-09-19) — src/routes/*, src/index.ts (route mounting), src/streaming/*, types/index.ts (actual implemented code + its own .ai/context/FRONTEND-CONTRACT.md, not design docs)
 stale-after-days: 30
 ---
 
@@ -62,8 +62,20 @@ The token is checked at **connect time only** and the browser's own
 auto-reconnect reuses the same URL — so an expired token turns a reconnect into
 a 401 and the browser gives up permanently. `use-ghost-stream.ts` handles it:
 when the source is CLOSED it reopens with a freshly fetched token (with
-backoff). Note the backend checks the token is *valid*, not that the
-`canvas_id`/`session_id` in the body belong to that user — see Known Gap #1.
+backoff, capped — see below).
+
+**Ownership is enforced too** (`src/lib/ownership.ts`): `session/start` requires
+the caller to own `canvas_id`; `session/complete`, `canvas-event`, `ghost-status`
+and the stream require them to own `session_id` (and, where a `canvas_id` is
+also sent, that the session belongs to *that* canvas — so pairing your canvas
+with someone else's session is rejected). A denial is
+`403 {"error":"forbidden"}` and deliberately doesn't say which check failed;
+`ghost-status` also 404s a `thread_id` that isn't on the verified canvas. The
+frontend only ever sends ids it got from its own RLS-scoped reads, so a 403
+means a stale tab / account mismatch (e.g. signed in as someone else in another
+tab), never a normal flow. `EventSource` hides the HTTP status, so
+`use-ghost-stream.ts` can't tell a 403 from an expired token — it caps
+consecutive reopen attempts (5) and resumes when the tab regains focus.
 
 ---
 
@@ -255,7 +267,7 @@ above) and removed; numbers below aren't renumbered to fill the gap.
 
 | # | Severity | Gap | Impact | Direction |
 |---|---|---|---|---|
-| 1 | P1 | ~~No auth on any `/api/*` route~~ **JWT now required** (2026-09-19 — frontend sends it; see above). **Still open:** the routes only verify the token is valid, they don't check the caller *owns* the `canvas_id`/`session_id` in the request | Any signed-in user (a guest counts) who knows another canvas's uuid can post events for it or read its session stream | Backend should compare `userId` (already set on the Hono context) to the canvas's `user_id` before acting |
+| 1 | ~~P1~~ | ~~No auth on any `/api/*` route or the SSE stream~~ **Closed 2026-09-19** — JWT required on every route (frontend sends it) and ownership of `canvas_id`/`session_id` enforced (403). Verified against the local backend: own ids 200; someone else's canvas/session 403 on `session/start`, `canvas-event` (incl. own-canvas + their-session), `ghost-status` and the stream | — | — |
 | 2 | P1 | Free tier reaches Outer Subconscious via question edges — tier is only checked in the debounced pipeline, not `outer-sub-pipeline.ts` | A tier-driven `UpgradePrompt` on question edges would be wrong; don't gate that affordance on tier | Backend should gate the immediate pipelines by tier too (or intentionally make Outer-Sub free and document it) |
 | 3 | P1 | `carry_forward_ids` accepted by the schema, ignored by the pipeline | The "Carry Forward" screen can't rely on it persisting anything | Backend should wire it into session-complete, or drop it from the schema until built |
 | 4 | P2 | `observerEdgeStatusSchema` exists in `types/index.ts` but **no route implements it** | Per-edge Observer accept/reject UI has nothing to call | Backend must add `POST /api/observer-edge-status` |

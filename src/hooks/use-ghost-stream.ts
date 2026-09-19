@@ -9,6 +9,9 @@ import type { RedisMessage } from "@/types"
 // Doubles per consecutive failure, resets once a connection actually opens.
 const RETRY_MIN_MS = 2_000
 const RETRY_MAX_MS = 30_000
+// Consecutive reopen attempts (no successful open in between) before giving
+// up until the tab regains focus. ~1 minute of trying at the backoff above.
+const MAX_REOPEN_ATTEMPTS = 5
 
 function handleFrame(e: MessageEvent) {
   // A malformed frame — a truncated write, a stray keepalive comment that
@@ -69,8 +72,17 @@ function handleFrame(e: MessageEvent) {
 // a 401, the browser gives up for good (readyState CLOSED, no more retries),
 // and the session would silently stop receiving ghosts. Hence the reopen in
 // onerror: a CLOSED source is rebuilt from scratch with a freshly fetched
-// token, with backoff so a persistent rejection (revoked user, backend
-// down) can't spin.
+// token, with backoff so a persistent rejection can't spin.
+//
+// The backend also enforces OWNERSHIP: a session that isn't the signed-in
+// user's gets 403 (thinking-canvas-be's ownsSession). EventSource hides the
+// HTTP status, so a 403 looks identical to an expired token here — but a
+// fresh token can't fix it, so retrying forever would just hammer the
+// backend (two DB queries a hit) from a tab that can never succeed. Real
+// case: sign in as a different account in a second tab, and the first tab's
+// stale canvas starts getting 403s. So reopening is capped at
+// MAX_REOPEN_ATTEMPTS consecutive failures, then paused until the tab
+// regains focus (which also covers a backend that was down for a while).
 export function useGhostStream(sessionId: string | null) {
   useEffect(() => {
     if (!sessionId) return
@@ -78,11 +90,22 @@ export function useGhostStream(sessionId: string | null) {
     let source: EventSource | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     let retryDelayMs = RETRY_MIN_MS
+    let attempts = 0
+    let gaveUp = false
     let cancelled = false
 
     function scheduleReopen() {
       if (cancelled) return
-      logger.warn("[ghost-stream] reopening with a fresh token", { sessionId, inMs: retryDelayMs })
+      if (attempts >= MAX_REOPEN_ATTEMPTS) {
+        gaveUp = true
+        logger.error(
+          "[ghost-stream] giving up — reopening keeps failing (session not owned by this account, or backend unreachable); will retry when the tab regains focus",
+          { sessionId, attempts },
+        )
+        return
+      }
+      attempts += 1
+      logger.warn("[ghost-stream] reopening with a fresh token", { sessionId, inMs: retryDelayMs, attempt: attempts })
       retryTimer = setTimeout(() => void open(), retryDelayMs)
       retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS)
     }
@@ -102,6 +125,7 @@ export function useGhostStream(sessionId: string | null) {
       source = es
       es.onopen = () => {
         retryDelayMs = RETRY_MIN_MS
+        attempts = 0
       }
       es.onmessage = handleFrame
       es.onerror = () => {
@@ -118,11 +142,24 @@ export function useGhostStream(sessionId: string | null) {
       }
     }
 
+    // Coming back to the tab is the cue to try again after giving up — the
+    // person may have just fixed whatever was wrong (signed back in, backend
+    // restarted).
+    function onVisible() {
+      if (document.visibilityState !== "visible" || !gaveUp || cancelled) return
+      gaveUp = false
+      attempts = 0
+      retryDelayMs = RETRY_MIN_MS
+      void open()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+
     void open()
 
     return () => {
       cancelled = true
       if (retryTimer) clearTimeout(retryTimer)
+      document.removeEventListener("visibilitychange", onVisible)
       source?.close()
     }
   }, [sessionId])
