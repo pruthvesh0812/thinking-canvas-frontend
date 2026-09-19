@@ -64,10 +64,20 @@ configuration, not something either repo's code can do.
 - `/login` shows a resend option on `email_not_confirmed` (only reachable once
   the project enables email confirmations — off locally, on in prod) and a
   pointer to `/account` for a guest with a link already pending.
-- Local dev: `enable_confirmations = false` means plain email sign-ins aren't
-  verification-gated, but converting a guest's email always is (email change).
-  Confirmation emails land in the local mail inbox (port 54324).
-  `auth.rate_limit.email_sent = 2`/hour will throttle repeated resends.
+- Local dev **auto-confirms**: `enable_confirmations = false` sets
+  `GOTRUE_MAILER_AUTOCONFIRM=true`, which makes Supabase apply an email change
+  IMMEDIATELY — no email is sent and the guest is permanent on the spot (their
+  row shows `is_anonymous = f`, `email_confirmed_at` set). `signUpWithEmail`
+  reads `data.user.new_email` from the response to tell "link sent" from
+  "applied now"; the latter routes to `/account` to set a password. To
+  exercise the real link flow locally, set `enable_confirmations = true` in
+  the backend's `supabase/config.toml` and restart Supabase — mail then lands
+  in the local inbox (port 54324; local Supabase never sends real email).
+  `auth.rate_limit.email_sent = 2`/hour throttles repeated resends.
+- Both `/login` and `/account` await `ensureAnonSession()` before reading the
+  user: the root-layout gate creates the guest session concurrently, and a bare
+  `getUser()` can lose that race (stale "Create your account" heading right
+  after sign-out; a dead-end error on a first-ever `/account` visit).
 
 ## Partial Implementation Note (2026-08-09) — historical, see Closed above
 

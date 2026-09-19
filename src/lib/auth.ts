@@ -109,13 +109,23 @@ export async function signUpWithEmail(email: string): Promise<AuthResult> {
     return { ok: false, error: "You're already signed in — sign out first to create a different account." }
   }
 
-  const { error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: callbackUrl() })
+  const { data, error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: callbackUrl() })
   if (error) {
     logger.error("[auth] anonymous→permanent conversion failed to start", { error })
     return { ok: false, error: error.message }
   }
-  logger.info("[auth] email confirmation sent for anonymous conversion", { userId: user.id })
-  return { ok: true, needsEmailConfirmation: true }
+
+  // Ask Supabase what actually happened instead of assuming a link was sent.
+  // When the project requires confirmation, the address is parked in
+  // `new_email` until the link is clicked. When it auto-confirms (local dev:
+  // `enable_confirmations = false` → GOTRUE_MAILER_AUTOCONFIRM) the change is
+  // applied immediately — no email is sent at all and the user is already
+  // permanent, so telling them to "check your email" would be a lie.
+  const pending = Boolean(data.user?.new_email)
+  logger.info(pending ? "[auth] email confirmation sent for anonymous conversion" : "[auth] email applied immediately (auto-confirm)", {
+    userId: user.id,
+  })
+  return { ok: true, needsEmailConfirmation: pending }
 }
 
 // Ordinary sign-in against an existing permanent account — never used for

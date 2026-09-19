@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
-import { resendVerification, setPassword, signOut } from "@/lib/auth"
+import { ensureAnonSession, resendVerification, setPassword, signOut } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 
 type LoadState = "loading" | "ready" | "error"
@@ -33,7 +33,10 @@ export default function AccountPage() {
     // email_confirmed_at reflect a confirmation link clicked a moment ago
     // rather than the JWT's stale claims.
     function load() {
-      void supabase.auth.getUser().then(({ data, error }) => {
+      // ensureAnonSession first so a first-ever visit (guest session still
+      // being created by the root layout) doesn't read "no session" and
+      // dead-end in the error state.
+      void ensureAnonSession().then(() => supabase.auth.getUser()).then(({ data, error }) => {
         if (cancelled) return
         if (error) {
           // "No session" is a real state here (just signed out, session

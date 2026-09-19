@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { continueWithGoogle, resendVerification, signInWithEmail, signUpWithEmail } from "@/lib/auth"
+import { continueWithGoogle, ensureAnonSession, resendVerification, signInWithEmail, signUpWithEmail } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 
 type Mode = "create" | "signin"
@@ -58,7 +58,11 @@ function LoginForm() {
 
   useEffect(() => {
     let cancelled = false
-    void supabase.auth.getUser().then(({ data, error: getUserError }) => {
+    // ensureAnonSession first: on a fresh load (or right after sign-out) the
+    // root layout's AnonymousAuthGate is still creating the guest session
+    // concurrently, and a bare getUser() here can win that race, see no user,
+    // and leave this page believing "not a guest" for good.
+    void ensureAnonSession().then(() => supabase.auth.getUser()).then(({ data, error: getUserError }) => {
       if (cancelled) return
       if (getUserError) {
         logger.warn("[login] failed to read current user", { error: getUserError })
@@ -105,7 +109,10 @@ function LoginForm() {
       )
       return
     }
-    router.push(next)
+    // Create mode reaching here means the email was applied immediately
+    // (auto-confirm) — the account is saved but has no password yet, and
+    // /account is where that step lives. Sign-in goes wherever it was headed.
+    router.push(mode === "create" ? "/account" : next)
   }
 
   async function handleResend() {
