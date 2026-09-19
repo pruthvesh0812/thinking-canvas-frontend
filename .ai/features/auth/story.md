@@ -43,6 +43,32 @@ Google OAuth provider configured (Client ID/secret, authorized redirect URI
 `<origin>/auth/callback`) in the Supabase dashboard — that's project
 configuration, not something either repo's code can do.
 
+## Addendum (2026-09-19) — account page, verification, sign-out
+
+- `src/app/account/page.tsx` — guest / verification-pending / verified
+  states, resend confirmation (`auth.resend`), set-or-change password, and
+  sign out. Reached from the dashboard's avatar (now a real link with the
+  user's initial). Sign-out is offered to permanent accounts only: a guest
+  can't sign back in, so logging one out would orphan their canvases.
+  It signs out with `scope: 'local'` (this browser only) and hard-navigates
+  to `/login?signedOut=1` so every in-memory Zustand store is discarded.
+- **Correction to the Closed note above:** email conversion is NOT a single
+  `updateUser({ email, password })`. Per Supabase's docs a password can't be
+  set on an unverified anonymous user, so it's two steps: `updateUser({ email })`
+  (confirmation link; `emailRedirectTo` = the bare `/auth/callback`), then
+  `updateUser({ password })` from `/account` after verifying. `/login`'s
+  create mode is email-only accordingly.
+- `emailRedirectTo` now follows the same exact-match rule as the OAuth
+  `redirectTo` (see ARCHITECTURE.md) — the confirmation link would otherwise
+  have hit the same `site_url` fallback.
+- `/login` shows a resend option on `email_not_confirmed` (only reachable once
+  the project enables email confirmations — off locally, on in prod) and a
+  pointer to `/account` for a guest with a link already pending.
+- Local dev: `enable_confirmations = false` means plain email sign-ins aren't
+  verification-gated, but converting a guest's email always is (email change).
+  Confirmation emails land in the local mail inbox (port 54324).
+  `auth.rate_limit.email_sent = 2`/hour will throttle repeated resends.
+
 ## Partial Implementation Note (2026-08-09) — historical, see Closed above
 
 Only the anonymous sign-in slice has landed — `src/hooks/use-anonymous-auth.ts`,

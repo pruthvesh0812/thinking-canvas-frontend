@@ -25,7 +25,9 @@ export async function ensureAnonSession(): Promise<User | null> {
   return data.user ?? null
 }
 
-export type AuthResult = { ok: true; needsEmailConfirmation?: boolean } | { ok: false; error: string }
+export type AuthResult =
+  | { ok: true; needsEmailConfirmation?: boolean }
+  | { ok: false; error: string; code?: string }
 
 // The one redirect target for every OAuth round trip — deliberately NO
 // query string. Supabase's redirect allow-list (thinking-canvas-be's
@@ -82,46 +84,96 @@ export async function continueWithGoogle(next = "/"): Promise<AuthResult> {
   return { ok: true }
 }
 
-// Email/password conversion or signup, same anonymous-branch reasoning as
-// continueWithGoogle: an anonymous session upgrades in place via
-// updateUser (same uid, keeps every canvas); anything else is a fresh
-// supabase.auth.signUp. Supabase sends a confirmation email either way when
-// the project has email confirmations on — `needsEmailConfirmation` lets the
-// caller show the right copy instead of assuming the session is live yet.
-export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
+// Email "create account" — ALWAYS an anonymous→permanent conversion, never a
+// fresh supabase.auth.signUp, because every visitor already has an anonymous
+// session (AnonymousAuthGate) and converting in place keeps the same uid, so
+// every canvas carries over.
+//
+// Two steps, per Supabase's anonymous-conversion docs ("to add a password for
+// the anonymous user, the user's email needs to be verified first"):
+//   1. here — updateUser({ email }) starts an email-change: Supabase mails a
+//      confirmation link; until it's clicked the user stays anonymous (and
+//      proxy.ts keeps treating them as such) with the address parked in
+//      `user.new_email`.
+//   2. after the link lands back via /auth/callback, the account page offers
+//      "Set a password" (setPassword below).
+// Passing a password in step 1 (what this used to do) isn't valid for an
+// unverified anonymous user, so there's deliberately no password param.
+//
+// emailRedirectTo matters as much as the OAuth redirectTo: it has to exact-
+// match Supabase's `additional_redirect_urls` or the confirmation link falls
+// back to `site_url` (another app's port, locally).
+export async function signUpWithEmail(email: string): Promise<AuthResult> {
   const user = await ensureAnonSession()
-
-  if (user?.is_anonymous) {
-    const { data, error } = await supabase.auth.updateUser({ email, password })
-    if (error) {
-      logger.error("[auth] anonymous→permanent conversion failed", { error })
-      return { ok: false, error: error.message }
-    }
-    logger.info("[auth] converted anonymous session to permanent account", { userId: data.user?.id })
-    // Supabase requires confirming the new email address before it takes
-    // effect on an identity-linking update — the uid (and its canvases)
-    // already belong to this account either way.
-    return { ok: true, needsEmailConfirmation: true }
+  if (!user?.is_anonymous) {
+    return { ok: false, error: "You're already signed in — sign out first to create a different account." }
   }
 
-  const { data, error } = await supabase.auth.signUp({ email, password })
+  const { error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: callbackUrl() })
   if (error) {
-    logger.error("[auth] sign-up failed", { error })
+    logger.error("[auth] anonymous→permanent conversion failed to start", { error })
     return { ok: false, error: error.message }
   }
-  logger.info("[auth] signed up", { userId: data.user?.id })
-  return { ok: true, needsEmailConfirmation: !data.session }
+  logger.info("[auth] email confirmation sent for anonymous conversion", { userId: user.id })
+  return { ok: true, needsEmailConfirmation: true }
 }
 
 // Ordinary sign-in against an existing permanent account — never used for
 // conversion (that always goes through signUpWithEmail/continueWithGoogle),
-// only for the "I already have an account" path on /login.
+// only for the "I already have an account" path on /login. Surfaces
+// Supabase's error `code` so the caller can offer "resend confirmation" on
+// `email_not_confirmed` (only reachable once the project has email
+// confirmations enabled — off in local dev, on in prod).
 export async function signInWithEmail(email: string, password: string): Promise<AuthResult> {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
     logger.error("[auth] sign-in failed", { error })
-    return { ok: false, error: error.message }
+    return { ok: false, error: error.message, code: error.code }
   }
   logger.info("[auth] signed in", { userId: data.user?.id })
+  return { ok: true }
+}
+
+// Step 2 of email conversion, and the ordinary "change password" too — same
+// call either way. Only valid once the email is verified (Supabase rejects
+// it for an unverified anonymous user, which the account page never offers).
+export async function setPassword(password: string): Promise<AuthResult> {
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) {
+    logger.error("[auth] password update failed", { error })
+    return { ok: false, error: error.message }
+  }
+  logger.info("[auth] password updated")
+  return { ok: true }
+}
+
+// Re-sends the confirmation email for whichever flow is pending:
+//   'email_change' — an anonymous user's parked new_email (signUpWithEmail)
+//   'signup'       — a fresh signUp still awaiting confirmation (prod, once
+//                    enable_confirmations is on)
+export async function resendVerification(email: string, type: "email_change" | "signup"): Promise<AuthResult> {
+  const { error } = await supabase.auth.resend({ type, email, options: { emailRedirectTo: callbackUrl() } })
+  if (error) {
+    logger.error("[auth] resend verification failed", { type, error })
+    return { ok: false, error: error.message }
+  }
+  logger.info("[auth] verification email re-sent", { type })
+  return { ok: true }
+}
+
+// Local-scope sign-out: ends THIS browser's session only. signOut()'s
+// default is 'global' — it would also kill the user's sessions on every
+// other device, which is more than "log me out" means. The caller follows
+// this with a hard navigation (window.location.assign) rather than a
+// client-side router push so every in-memory Zustand store (canvas nodes,
+// session, ghosts) is discarded — otherwise the previous user's canvas
+// would still be sitting in memory for whoever signs in next.
+export async function signOut(): Promise<AuthResult> {
+  const { error } = await supabase.auth.signOut({ scope: "local" })
+  if (error) {
+    logger.error("[auth] sign-out failed", { error })
+    return { ok: false, error: error.message }
+  }
+  logger.info("[auth] signed out")
   return { ok: true }
 }

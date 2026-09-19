@@ -62,7 +62,9 @@ thinking-canvas-web/
 │   │   │   ├── new/page.tsx        # north star capture (original_intent, write-once)
 │   │   │   └── [canvasId]/page.tsx # the canvas itself
 │   │   ├── login/page.tsx
-│   │   └── settings/page.tsx       # account + Stripe portal link
+│   │   ├── account/page.tsx        # identity: guest/verified state, password, sign out
+│   │   ├── auth/callback/route.ts  # OAuth + email-confirmation code exchange
+│   │   └── settings/page.tsx       # billing: Stripe portal link
 │   ├── components/
 │   │   ├── canvas/
 │   │   │   ├── Canvas.tsx          # React Flow wrapper — nodeTypes/edgeTypes registration

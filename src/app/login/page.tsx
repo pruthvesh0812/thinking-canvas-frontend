@@ -1,9 +1,10 @@
 "use client"
 
 import { Suspense, useEffect, useState, type FormEvent } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { continueWithGoogle, signInWithEmail, signUpWithEmail } from "@/lib/auth"
+import { continueWithGoogle, resendVerification, signInWithEmail, signUpWithEmail } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 
 type Mode = "create" | "signin"
@@ -29,9 +30,21 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const next = searchParams.get("next") || "/"
   const redirectError = searchParams.get("error")
+  // Set by the account page's sign-out (hard navigation) — someone who just
+  // signed out is here to sign back in, not to "save" a session they no
+  // longer have, so open on the sign-in form with a confirmation line.
+  const signedOut = searchParams.get("signedOut") === "1"
 
-  const [mode, setMode] = useState<Mode>("create")
+  const [mode, setMode] = useState<Mode>(signedOut ? "signin" : "create")
   const [isAnonymous, setIsAnonymous] = useState<boolean | null>(null)
+  // An anonymous user who already asked for a confirmation link and hasn't
+  // clicked it yet — Supabase parks the address in `new_email`. Shown as a
+  // pointer to /account rather than letting them think the form is fresh.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
+  // Set when a sign-in fails because the address was never confirmed (only
+  // possible once the project has email confirmations enabled) — offers a
+  // resend instead of a dead-end error.
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -41,7 +54,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(
     redirectError ? "That didn't go through — try again." : null,
   )
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(signedOut ? "You've been signed out." : null)
 
   useEffect(() => {
     let cancelled = false
@@ -52,6 +65,7 @@ function LoginForm() {
         return
       }
       setIsAnonymous(data.user?.is_anonymous ?? false)
+      setPendingEmail(data.user?.new_email ?? null)
     })
     return () => {
       cancelled = true
@@ -75,20 +89,37 @@ function LoginForm() {
     setSubmitting(true)
     setError(null)
     setNotice(null)
+    setUnconfirmedEmail(null)
 
-    const result =
-      mode === "create" ? await signUpWithEmail(email, password) : await signInWithEmail(email, password)
+    const result = mode === "create" ? await signUpWithEmail(email) : await signInWithEmail(email, password)
 
+    setSubmitting(false)
+    if (!result.ok) {
+      setError(result.error)
+      if (result.code === "email_not_confirmed") setUnconfirmedEmail(email)
+      return
+    }
+    if (result.needsEmailConfirmation) {
+      setNotice(
+        `We sent a confirmation link to ${email}. Open it to finish saving your account — you can set a password afterward.`,
+      )
+      return
+    }
+    router.push(next)
+  }
+
+  async function handleResend() {
+    if (!unconfirmedEmail) return
+    setSubmitting(true)
+    setError(null)
+    const result = await resendVerification(unconfirmedEmail, "signup")
     setSubmitting(false)
     if (!result.ok) {
       setError(result.error)
       return
     }
-    if (result.needsEmailConfirmation) {
-      setNotice("Check your email to confirm the address, then come back and sign in.")
-      return
-    }
-    router.push(next)
+    setUnconfirmedEmail(null)
+    setNotice(`Sent a new confirmation link to ${unconfirmedEmail}.`)
   }
 
   const heading =
@@ -106,6 +137,15 @@ function LoginForm() {
         <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
         <p className="text-zinc-600 dark:text-zinc-400">{subhead}</p>
       </div>
+
+      {pendingEmail && (
+        <p className="rounded-lg bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          A confirmation link is waiting at {pendingEmail}.{" "}
+          <Link href="/account" className="underline underline-offset-2">
+            Check its status
+          </Link>
+        </p>
+      )}
 
       <button
         type="button"
@@ -131,23 +171,34 @@ function LoginForm() {
           onChange={(e) => setEmail(e.target.value)}
           className="rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700"
         />
-        <input
-          type="password"
-          required
-          minLength={8}
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700"
-        />
+        {mode === "signin" && (
+          <input
+            type="password"
+            required
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700"
+          />
+        )}
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {unconfirmedEmail && (
+          <button
+            type="button"
+            onClick={() => void handleResend()}
+            disabled={submitting}
+            className="self-start text-sm text-zinc-600 underline underline-offset-2 disabled:opacity-60 dark:text-zinc-400"
+          >
+            Resend confirmation email
+          </button>
+        )}
         {notice && <p className="text-sm text-emerald-700 dark:text-emerald-400">{notice}</p>}
         <button
           type="submit"
           disabled={submitting}
           className="rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
         >
-          {submitting ? "…" : mode === "create" ? "Create account" : "Sign in"}
+          {submitting ? "…" : mode === "create" ? "Email me a confirmation link" : "Sign in"}
         </button>
       </form>
 
