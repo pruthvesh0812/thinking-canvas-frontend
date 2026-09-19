@@ -1,7 +1,9 @@
 "use client"
 
 import { useSessionCompleteStore } from "@/stores/session-complete-store"
+import { useSessionStore } from "@/stores/session-store"
 import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
+import { SignupPrompt } from "@/components/auth/SignupPrompt"
 import { ObserverSuggestions } from "./ObserverSuggestions"
 import { UnresolvedThreads } from "./UnresolvedThreads"
 
@@ -10,6 +12,8 @@ const TITLE = {
   threads: "Unresolved threads",
   closed: "Session closed",
 } as const
+
+const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
 
 // The one true modal in the product (SESSION-FLOWS.md — "the most
 // significant UI moment in a session, a distinct modal flow, not an inline
@@ -23,6 +27,11 @@ export function SessionCompleteModal() {
     (s) => Object.values(s.choices).filter((c) => c === "carry").length,
   )
   const reset = useSessionCompleteStore((s) => s.reset)
+  // Read BEFORE startNewSession runs (it refreshes pastSessions once the
+  // close actually completes) — zero here means the session being closed
+  // right now was this canvas's first, which is the one moment
+  // ARCHITECTURE.md's Auth Flow calls out for the signup ask.
+  const isFirstSessionComplete = useSessionStore((s) => s.pastSessions.length === 0)
   const { startNewSession } = useSessionLifecycle()
 
   if (!open) return null
@@ -76,6 +85,11 @@ export function SessionCompleteModal() {
                   ? `${carryCount} carried ${carryCount === 1 ? "item" : "items"} will open with the new session.`
                   : "nothing to carry forward this time."}
               </p>
+              {!USE_MOCK_PERSISTENCE && isFirstSessionComplete && (
+                <div className="w-full max-w-[380px]">
+                  <SignupPrompt />
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => void startNewSession()}

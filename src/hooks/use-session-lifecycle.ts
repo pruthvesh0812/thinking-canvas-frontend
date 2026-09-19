@@ -23,8 +23,9 @@ const POLL_ATTEMPTS = 5
 // follow-up at their target, and human nodes left empty. "Accepted
 // contradiction nodes with no follow-up" is out of reach today — a
 // materialized ghost doesn't retain its ContextNodeType on the resulting
-// canvas node (ghost-interaction's materializeGhost is still a stub) — a
-// flagged gap, not worked around with a guess.
+// canvas node (materializeAcceptedGhost in use-canvas-persistence.ts inserts
+// owner:"ai" content only, no type column) — a flagged gap, not worked
+// around with a guess.
 function computeUnresolvedThreads(): UnresolvedThread[] {
   const { nodes, edges } = useCanvasStore.getState()
   const hasOutgoing = (nodeId: string) => edges.some((e) => e.source === nodeId)
@@ -232,9 +233,6 @@ export function useSessionLifecycle() {
         .insert(carried.map((t) => ({ canvas_id: canvasId, session_id: sessionId, content: t.content, type: t.kind })))
       if (error) logger.warn("[session] failed to persist carry-forward learnings", { sessionId, error })
     }
-
-    console.log({canvasId});
-    
 
     const pastSessions = canvasId ? (await fetchSessionHistory(canvasId))?.pastSessions ?? [] : []
     useSessionStore.getState().returnToSessionLanding(pastSessions)

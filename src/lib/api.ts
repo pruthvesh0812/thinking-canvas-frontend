@@ -1,3 +1,4 @@
+import { getAccessToken } from "@/lib/auth"
 import { logger } from "@/lib/logger"
 import type {
   CanvasEvent,
@@ -8,7 +9,8 @@ import type {
 } from "@/types"
 
 // Exported so use-ghost-stream.ts can build the SSE URL from the same
-// source — EventSource has no header hook to route through `post()` below.
+// source — EventSource has no header hook to route through `post()` below,
+// so the stream carries its token as `?token=` instead (see that hook).
 export const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
 // Typed error carrying enough to decide a retry/rollback strategy at the call
@@ -26,14 +28,22 @@ export class ApiError extends Error {
 }
 
 // Thin generic: JSON in/out, structured logging, typed errors. Every endpoint
-// wrapper below stays one honest line of intent. There is no auth header
-// here today (API-CONTRACT.md — no auth on any /api/* route yet); isolating
-// that fact to this one function is what makes adding a Supabase JWT later a
-// one-file change.
+// wrapper below stays one honest line of intent. Every /api/* route requires
+// the caller's Supabase access token as a Bearer header (API-CONTRACT.md
+// Known Gap #1, closed backend-side) — attached here, in the one place every
+// POST goes through. The backend also checks the ids in the body belong to
+// that user (403 otherwise); we only ever send ids from our own RLS-scoped
+// reads, so a 403 here means a stale tab or account mismatch. If there's
+// somehow no token we still send the request: the backend's 401 gets logged
+// like any other failure, which beats a silent client-side skip.
 async function post<T>(path: string, body: unknown): Promise<T> {
+  const token = await getAccessToken()
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   })
   if (!res.ok) {

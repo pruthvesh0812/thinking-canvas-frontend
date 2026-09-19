@@ -25,7 +25,7 @@ contract impact, and definition of done.
 | 6 | `ghost-interaction` | 🟡 UI-only — accept/reject never persists or reports | Accept/reject, rejection reasons, materialization | 5 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 7 | `session-lifecycle` | ✅ done (v1 simplifications documented in-file) | North star capture, phase toggle, Session Complete, carry-forward | 6 | CORE-CONCEPTS + SESSION-FLOWS |
 | 8 | `canvas-dashboard` | ✅ done | Multi-canvas home, create/open flow | 7 | CORE-CONCEPTS + SESSION-FLOWS |
-| 9 | `auth` | 🟡 partial — anonymous sign-in only; conversion/gate/login unbuilt | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
+| 9 | `auth` | ✅ done (closed 2026-09-18) | Anonymous-first, conversion, session-2+ gate | 8 | ARCHITECTURE + SESSION-FLOWS |
 | 10 | `billing-and-tiers` | ⬜ not started — settings/login still stub pages | Tier UI, UpgradePrompt, Stripe links | 9 ⚠gap#5 | ARCHITECTURE + API-CONTRACT |
 | 11 | `observer-structure-ui` | ⬜ not started — **backend-blocked** | Anchors, DAG reveal, per-edge consent | 7 ⚠gap#4 | CORE-CONCEPTS + GHOST-STREAMING + API-CONTRACT |
 | 12 | `session-selector` | ✅ done (closed 2026-08-31) | Real session history browsing (replaces mock-sessions.ts UI) | 8 | CORE-CONCEPTS + SESSION-FLOWS + STATE-MANAGEMENT |
@@ -69,10 +69,14 @@ work, in this order:
    (currently unused) once real pairs exist to accept/reject — nothing left
    blocking this backend-side; `thread_id`/`turn_index` come straight off
    `done`.
-5. Only after that loop is real end-to-end does `auth`'s remaining half
-   (signup prompt after Session Complete, `/login`, `middleware.ts` gate) or
-   `billing-and-tiers` become worth starting — both are still genuinely
-   untouched, not next in line yet.
+5. ~~Only after that loop is real end-to-end does `auth`'s remaining half...~~
+   **Superseded 2026-09-18:** steps 1–4 above (canvasEvent notify, real SSE,
+   ghost accept/reject persistence) were confirmed live against the code
+   before this story started — this numbered list had drifted stale. `auth`
+   is now ✅ done (signup prompt, `/login`, the session-2+ gate — see its own
+   row above and `.ai/features/auth/story.md`). `billing-and-tiers` and the
+   backend-blocked `observer-structure-ui` are what's actually next; see
+   the table at the top of this file, not this stale numbered list.
 
 ### Why this order
 
@@ -118,7 +122,7 @@ work, in this order:
 
 | Gap | Blocks | Action |
 |---|---|---|
-| #1 no auth on any `/api/*` route or the SSE stream | all stories (any origin-bypassing client can post events / read a stream by uuid) | backend should verify a Supabase JWT; token query-param for EventSource |
+| ~~#1 no auth on `/api/*`~~ — **closed 2026-09-19**: JWT required (frontend sends it) and canvas/session ownership enforced backend-side (403) | — | — |
 | #2 free tier still gets Outer-Sub on question edges (tier only checked in the debounced pipeline) | story 10 (UpgradePrompt logic) | don't gate the question-edge UI on tier until backend gates the pipeline too |
 | #3 `carry_forward_ids` accepted by the schema, ignored by the pipeline | story 7 (session-lifecycle's Carry Forward screen) | backend should wire it into session-complete, or drop it from the schema until built |
 | #4 no `observer-edge-status` route (schema exists, no route) | story 11 | backend adds the route + a structure read path |

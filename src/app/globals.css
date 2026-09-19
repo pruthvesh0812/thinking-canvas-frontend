@@ -173,3 +173,12 @@ body {
     transition-duration: .01ms !important;
   }
 }
+
+/* Chrome's autofill paints inputs pale blue — on the underline-only fields
+   (login) that reads as a stray box. Repaint to the paper surface. */
+.tc-scope input:-webkit-autofill,
+.tc-scope input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--tc-surface) inset;
+  -webkit-text-fill-color: var(--tc-ink);
+  caret-color: var(--tc-ink);
+}

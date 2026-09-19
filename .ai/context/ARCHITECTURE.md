@@ -1,6 +1,6 @@
 ---
-last-verified: 2026-07-05
-verified-against: backend ARCHITECTURE.md (2026-06-20) + backend src/index.ts (CORS, port, routes)
+last-verified: 2026-09-19
+verified-against: backend ARCHITECTURE.md (2026-06-20) + backend src/index.ts (CORS, port, routes) + Supabase auth docs (anonymous conversion, 2026-09-19)
 stale-after-days: 30
 ---
 
@@ -69,11 +69,24 @@ secret in this repo — `NEXT_PUBLIC_*` vars ship to the browser.
 ```
 Session 1 (anonymous): supabase.auth.signInAnonymously() — full canvas access, no friction
 First Session Complete: "Create account to save and continue"
-  → convert the anonymous user to permanent (updateUser email/password, or
-    linkIdentity for Google OAuth) — SAME user id, so RLS rows carry over
-    with no data migration
-Session 2+: middleware.ts redirects unauthenticated users to /login
+  → convert the anonymous user to permanent — SAME user id, so RLS rows
+    carry over with no data migration:
+      · Google: linkIdentity (instant, no verification step)
+      · Email: TWO steps — updateUser({ email }) mails a confirmation link
+        (user stays anonymous, address parked in `new_email`); once the link
+        is clicked, updateUser({ password }) from /account. Supabase rejects
+        a password on an unverified anonymous user, so the two can't be one call.
+Session 2+: proxy.ts (Next 16's middleware.ts) redirects anonymous users to /login
+Account page (/account): guest / verification-pending / verified states,
+  resend confirmation, set password, sign out (permanent accounts only —
+  a guest can't sign back in, so logging one out would orphan its canvases)
 ```
+
+**Redirect URLs must match Supabase's allow-list EXACTLY** (`additional_redirect_urls`
+in the backend's `supabase/config.toml`). The OAuth `redirectTo` and the email
+`emailRedirectTo` are both the bare `<origin>/auth/callback` — no query string.
+A mismatch makes Supabase silently fall back to `site_url` (another app's port,
+locally). Post-auth destinations travel via sessionStorage, not the URL.
 
 Auth methods: Google OAuth (primary) + email/password. All via Supabase Auth
 (`@supabase/ssr` for the middleware/server side).

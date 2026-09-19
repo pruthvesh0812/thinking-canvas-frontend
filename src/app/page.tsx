@@ -42,6 +42,9 @@ export default function DashboardPage() {
       : [],
   )
   const [state, setState] = useState<LoadState>(USE_MOCK_PERSISTENCE ? "ready" : "loading")
+  // Avatar initial — real mode fills it from the signed-in user once known
+  // ("G" for a guest with no email yet); mock mode keeps its fixture.
+  const [avatarInitial, setAvatarInitial] = useState(USE_MOCK_PERSISTENCE ? "AL" : "")
   // Inline rename — id of the card currently in edit mode, plus its draft
   // text. Only one card edits at a time. menuOpenId tracks which card's "⋯"
   // menu (Rename) is open — also only ever one at a time.
@@ -94,7 +97,8 @@ export default function DashboardPage() {
       // RLS scopes the select to the signed-in user's own canvases — no
       // explicit user_id filter needed, but a session must exist first or the
       // read comes back empty.
-      await ensureAnonSession()
+      const user = await ensureAnonSession()
+      if (!cancelled) setAvatarInitial(user?.email ? user.email[0].toUpperCase() : "G")
       const { data, error } = await supabase
         .from("canvases")
         .select("id, title, original_intent, created_at")
@@ -134,12 +138,15 @@ export default function DashboardPage() {
             <span className="text-xs" style={{ color: "var(--tc-chrome-quiet)" }}>
               {state === "ready" ? `${canvases.length} canvases` : " "}
             </span>
-            <div
-              className="flex h-[30px] w-[30px] items-center justify-center rounded-full text-[11.5px] font-semibold"
+            <Link
+              href="/account"
+              title="Account"
+              aria-label="Account"
+              className="flex h-[30px] w-[30px] items-center justify-center rounded-full text-[11.5px] font-semibold hover:brightness-95"
               style={{ background: "#EFE8D9", border: "1px solid var(--tc-hairline-strong)", color: "#6B6257" }}
             >
-              AL
-            </div>
+              {avatarInitial}
+            </Link>
           </div>
         </div>
 
