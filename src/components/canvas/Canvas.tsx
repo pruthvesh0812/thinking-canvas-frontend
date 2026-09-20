@@ -46,6 +46,7 @@ import { CanvasFooter } from "./CanvasFooter"
 import { PenRack } from "./PenRack"
 import { OpenThreadsRail } from "./OpenThreadsRail"
 import { DebounceIndicator } from "./DebounceIndicator"
+import { InterventionOfferCard } from "./InterventionOfferCard"
 import { HistoryBar } from "./HistoryBar"
 import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
 import { SessionCompleteModal } from "../session/SessionCompleteModal"
@@ -586,6 +587,7 @@ function CanvasInner() {
         )}
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
+        {!isHistory && <InterventionOfferCard />}
         <SessionInsightsPanel />
 
         {/* Group delete confirm (2+ nodes selected, Backspace/Delete) — one
