@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useGhostStore } from "@/stores/ghost-store"
+import { useInterventionStore } from "@/stores/intervention-store"
 import { API_URL } from "@/lib/api"
 import { getAccessToken } from "@/lib/auth"
 import { logger } from "@/lib/logger"
@@ -39,13 +40,29 @@ function handleFrame(e: MessageEvent) {
     case "done":
       useGhostStore.getState().markDone(msg)
       break
+    case "waiting":
+      // The presentation gate opens — the backend judge found this mature
+      // and created an offer, but nothing has been generated yet. timer_ms
+      // is backend-tuned (receptivity-adjusted); never hard-code it.
+      useInterventionStore.getState().setWaiting(msg.offer, msg.timer_ms)
+      break
+    case "offer":
+      // The show signal — published before the ghost stream's own `spawn`
+      // for the same generation. Carries the directness/headline the glow
+      // or sidebar card renders.
+      useInterventionStore.getState().setOffer(msg.offer)
+      break
+    case "withdraw":
+      // The backend aborted or expired this offer (re-judge found it no
+      // longer mature on `/process`, or its 10m window lapsed with no
+      // response) — remove it, nothing was ever generated for it.
+      useInterventionStore.getState().withdraw(msg.offer_id)
+      break
     case "ping":
       break
     default:
-      // Forward-compat: 'waiting'/'offer'/'withdraw' are typed but never
-      // emitted today (routes/intervention.ts isn't mounted) — and the
-      // protocol may grow further. Unknown types are logged and
-      // ignored, never thrown on (non-negotiable #10).
+      // Unknown types are logged and ignored, never thrown on
+      // (non-negotiable #10) — the protocol may keep growing.
       logger.warn("[ghost-stream] unhandled message type", { msg })
   }
 }
