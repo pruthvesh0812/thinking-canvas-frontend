@@ -13,6 +13,15 @@
 // main) — the "set aside" (soft-archive) feature. The position-persistence
 // staleness noted above is STILL untouched (different story); a full resync
 // is still owed once that branch lands on main.
+// PARTIAL SYNC 2026-09-20: InterventionTriggerPayload/Response,
+// InterventionProcessPayload, InterventionDismissPayload — hand-added from
+// the intervention-spectrum spec, NOT pulled from a backend commit (this
+// session has no access to thinking-canvas-api). These back the new
+// POST /intervention/trigger|process|dismiss routes that mount
+// routes/intervention.ts alongside the already-mirrored `waiting`/`offer`/
+// `withdraw` RedisMessage variants and InterventionOffer below. Treat as
+// provisional until a real sync-contract-types.md run confirms the exact
+// shapes against the backend's actual Zod schemas.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md
 //
 // This repo does not ship zod at runtime (no `zod` dependency) — the
@@ -432,6 +441,43 @@ export type GhostStatusPayload = {
   question_node_status: 'accepted' | 'rejected' | null
   rejection_reason?: RejectionReason
   interacted_at: number // unix ms
+}
+
+// POST /intervention/trigger — the frontend's own cheap ruleset (cursor/
+// dwell/action-class) decided this is worth asking the backend judge about.
+// Deliberately carries no "is this mature" signal — that call is the
+// backend's alone. Response is just enough for the frontend to correlate a
+// later `waiting`/`offer`/`withdraw` SSE message with this call, though in
+// practice the offer id arrives off the SSE message itself, keyed by
+// (anchor_node_id, seq).
+export type InterventionTriggerPayload = {
+  canvas_id: string
+  session_id: string
+  node_id: string
+}
+
+export type InterventionTriggerResponse = {
+  offer_id: string
+}
+
+// POST /intervention/process — fired when the presentation-gate timer
+// resolves, either by lapsing on its own or by the user pulling it forward /
+// resuming a paused timer. `reason` is NOT cosmetic: it becomes the show
+// ruleset's attention state ('manual' → a more direct surface, 'lapse' →
+// subtler), so send it honestly rather than collapsing both cases to one call.
+export type InterventionProcessPayload = {
+  offer_id: string
+  session_id: string
+  canvas_id: string
+  reason: 'lapse' | 'manual'
+}
+
+// POST /intervention/dismiss — the user waved the offer off before its timer
+// resolved. A receptivity signal only, never routed through Rejection
+// Insights (that's the acceptance gate's job, unchanged) — no content was
+// ever generated for a dismissed offer.
+export type InterventionDismissPayload = {
+  offer_id: string
 }
 
 // POST /api/observer-edge-status — mirrored for completeness; NOT a live

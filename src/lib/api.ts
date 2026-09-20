@@ -3,6 +3,10 @@ import { logger } from "@/lib/logger"
 import type {
   CanvasEvent,
   GhostStatusPayload,
+  InterventionDismissPayload,
+  InterventionProcessPayload,
+  InterventionTriggerPayload,
+  InterventionTriggerResponse,
   SessionCompletePayload,
   SessionStartPayload,
   SessionStartResponse,
@@ -85,6 +89,29 @@ export function sessionStart(payload: SessionStartPayload) {
 // (API-CONTRACT.md Known Gap #3) — don't build UI that assumes it persists.
 export function sessionComplete(payload: SessionCompletePayload) {
   return post<{ ok: true }>("/api/session/complete", payload)
+}
+
+// POST /intervention/trigger — call when the frontend's own trigger
+// ruleset (cursor/dwell/action-class) passes. Never gate this call on
+// maturity — that judgment is the backend's alone. The `waiting`/`offer`/
+// `withdraw` SSE messages, not this response, are what actually drive the
+// presentation-gate UI (use-ghost-stream.ts → intervention-store.ts).
+export function interventionTrigger(payload: InterventionTriggerPayload) {
+  return post<InterventionTriggerResponse>("/intervention/trigger", payload)
+}
+
+// POST /intervention/process — call when the presentation-gate timer
+// resolves. `reason` must reflect what actually happened ('lapse' vs
+// 'manual') — it feeds the show ruleset's attention state, so never default
+// or coalesce it.
+export function interventionProcess(payload: InterventionProcessPayload) {
+  return post<{ ok: true }>("/intervention/process", payload)
+}
+
+// POST /intervention/dismiss — the user waved the offer off before its
+// timer resolved. Receptivity signal only; fire-and-forget like canvasEvent.
+export function interventionDismiss(payload: InterventionDismissPayload) {
+  return post<{ ok: true }>("/intervention/dismiss", payload)
 }
 
 // No wrapper for POST /api/observer-edge-status — the schema exists in the
