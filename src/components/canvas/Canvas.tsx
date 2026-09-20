@@ -24,6 +24,8 @@ import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
+import { useIntervention } from "@/hooks/use-intervention"
+import { useInterventionTrigger } from "@/hooks/use-intervention-trigger"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
@@ -173,12 +175,32 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
+  const demo = useInterventionDemo()
+  // The real, backend-driven presentation gate: use-intervention-trigger.ts
+  // watches for settled node commits and calls POST /intervention/trigger;
+  // use-intervention.ts turns the resulting waiting/offer/withdraw SSE
+  // traffic (intervention-store) into the same phase/timer shape the demo
+  // hook produces, but backed by real POST /intervention/process|dismiss
+  // calls instead of local setTimeouts.
+  const intervention = useIntervention()
+  useInterventionTrigger(!isHistory)
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
   // starts empty, per north-star capture's resetToEmpty()).
   const hasInterventionScenario =
     !isHistory && storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
+  // The demo (manual QA button below) and the real hook can't actually
+  // collide — the demo drives ghost-store directly and never touches
+  // intervention-store — but DebounceIndicator is a single shared overlay,
+  // so only one phase machine can drive it at a time. The demo commandeers
+  // it for as long as it's actively running; otherwise the real,
+  // backend-driven gate owns it.
+  const usingDemoIndicator = demo.phase !== "idle"
+  const indicatorPhase = usingDemoIndicator ? demo.phase : intervention.phase
+  const indicatorRemaining = usingDemoIndicator ? demo.remaining : intervention.remaining
+  const indicatorPaused = usingDemoIndicator ? demo.paused : intervention.paused
+  const indicatorTogglePause = usingDemoIndicator ? demo.togglePause : intervention.togglePause
+  const indicatorProcessNow = usingDemoIndicator ? demo.processNow : intervention.processNow
 
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
@@ -466,26 +488,26 @@ function CanvasInner() {
         <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
           <button
             type="button"
-            onClick={trigger}
-            disabled={phase !== "idle"}
+            onClick={demo.trigger}
+            disabled={demo.phase !== "idle"}
             className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
-            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
+            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: demo.phase === "idle" ? 1 : 0.5 }}
           >
             ▶ Run the intervention
           </button>
           <button
             type="button"
-            onClick={reset}
+            onClick={demo.reset}
             className="rounded-full px-[13px] py-1 text-xs"
             style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
           >
             Reset
           </button>
           <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
-            {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
-            {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
-            {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
-            {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
+            {demo.phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
+            {demo.phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
+            {demo.phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
+            {demo.phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
           </span>
         </div>
       )}
@@ -553,7 +575,13 @@ function CanvasInner() {
             control), not floating over the pane. */}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
-            <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
+            <DebounceIndicator
+              phase={indicatorPhase}
+              remaining={indicatorRemaining}
+              paused={indicatorPaused}
+              togglePause={indicatorTogglePause}
+              processNow={indicatorProcessNow}
+            />
           </div>
         )}
         {!isHistory && <PenRack />}
