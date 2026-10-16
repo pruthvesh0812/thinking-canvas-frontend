@@ -1,0 +1,129 @@
+import { logger } from "@/lib/logger"
+import type { ContextDecision, ContextEntry, ContextLink } from "@/lib/context-contract"
+
+// Persistence seam for context entries, links, sequence numbers and drafts.
+//
+// STAND-IN: the backend has no context tables yet (blocker.md BL-1/BL-2), so
+// this implementation keeps everything in localStorage, one key per canvas.
+// The method set deliberately mirrors the proposed Supabase write shape
+// (backend-requirements.md B1–B4) so swapping in the real implementation is
+// this one file — callers (use-context-notes.ts) never touch storage directly.
+// Every write is async and may reject; callers keep the draft and offer Retry.
+
+export interface ContextSnapshot {
+  entries: ContextEntry[]
+  links: ContextLink[]
+  decisions: ContextDecision[]
+  /** Node id → sequence number. Never pruned: a number is never reused, and
+   * an undone delete brings its node (same id) back to the same number. */
+  seqByNode: Record<string, number>
+  nextSeq: number
+  /** Edge ids whose "Why do these connect?" item the user dismissed — not
+   * asked again unless they open the edge's composer themselves. */
+  dismissedEdgePrompts: string[]
+}
+
+const PREFIX = "tc.context.v1."
+const DRAFTS_PREFIX = "tc.context-drafts.v1."
+
+function emptySnapshot(): ContextSnapshot {
+  return { entries: [], links: [], decisions: [], seqByNode: {}, nextSeq: 1, dismissedEdgePrompts: [] }
+}
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? ({ ...fallback, ...JSON.parse(raw) } as T) : fallback
+  } catch (error) {
+    logger.warn("[context-repo] read failed", { key, error: String(error) })
+    return fallback
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  // Throws on quota/blocked storage — callers surface that as a failed save.
+  window.localStorage.setItem(key, JSON.stringify(value))
+}
+
+function mutate(canvasId: string, fn: (s: ContextSnapshot) => void): Promise<void> {
+  try {
+    const snapshot = readJson(PREFIX + canvasId, emptySnapshot())
+    fn(snapshot)
+    writeJson(PREFIX + canvasId, snapshot)
+    return Promise.resolve()
+  } catch (error) {
+    logger.error("[context-repo] write failed", { canvasId, error: String(error) })
+    return Promise.reject(error)
+  }
+}
+
+export const contextRepository = {
+  storageKey: (canvasId: string) => PREFIX + canvasId,
+
+  load(canvasId: string): ContextSnapshot {
+    return readJson(PREFIX + canvasId, emptySnapshot())
+  },
+
+  insertEntry(canvasId: string, entry: ContextEntry, links: ContextLink[]) {
+    return mutate(canvasId, (s) => {
+      s.entries = [...s.entries.filter((e) => e.id !== entry.id), entry]
+      s.links = [...s.links.filter((l) => l.entry_id !== entry.id), ...links]
+    })
+  },
+
+  updateEntry(canvasId: string, entryId: string, patch: Partial<Pick<ContextEntry, "content" | "updated_at" | "deleted_at">>) {
+    return mutate(canvasId, (s) => {
+      s.entries = s.entries.map((e) => (e.id === entryId ? { ...e, ...patch } : e))
+    })
+  },
+
+  /** Replaces every link of one entry — used by move and its undo. */
+  setEntryLinks(canvasId: string, entryId: string, links: ContextLink[]) {
+    return mutate(canvasId, (s) => {
+      s.links = [...s.links.filter((l) => l.entry_id !== entryId), ...links]
+    })
+  },
+
+  /** Component deleted (state 'deleted') or its delete undone ('active'). */
+  setLinksStateForTargets(canvasId: string, targetIds: string[], state: ContextLink["state"]) {
+    const ids = new Set(targetIds)
+    return mutate(canvasId, (s) => {
+      s.links = s.links.map((l) => (l.target_id && ids.has(l.target_id) ? { ...l, state } : l))
+    })
+  },
+
+  logDecision(canvasId: string, decision: ContextDecision) {
+    return mutate(canvasId, (s) => {
+      s.decisions = [...s.decisions, decision]
+    })
+  },
+
+  saveSequence(canvasId: string, seqByNode: Record<string, number>, nextSeq: number) {
+    return mutate(canvasId, (s) => {
+      s.seqByNode = seqByNode
+      s.nextSeq = nextSeq
+    })
+  },
+
+  dismissEdgePrompt(canvasId: string, edgeId: string, dismissed: boolean) {
+    return mutate(canvasId, (s) => {
+      const rest = s.dismissedEdgePrompts.filter((id) => id !== edgeId)
+      s.dismissedEdgePrompts = dismissed ? [...rest, edgeId] : rest
+    })
+  },
+
+  // Drafts are synchronous and best-effort: they're written on every
+  // keystroke and must survive a refresh or a dropped connection, which is
+  // exactly what localStorage is good at (backend-requirements.md B10).
+  loadDrafts(canvasId: string): Record<string, string> {
+    return readJson<Record<string, string>>(DRAFTS_PREFIX + canvasId, {})
+  },
+
+  saveDrafts(canvasId: string, drafts: Record<string, string>) {
+    try {
+      writeJson(DRAFTS_PREFIX + canvasId, drafts)
+    } catch (error) {
+      logger.warn("[context-repo] draft write failed", { canvasId, error: String(error) })
+    }
+  },
+}

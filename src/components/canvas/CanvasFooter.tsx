@@ -4,6 +4,7 @@ import { hasSessionChanges, useCanvasStore } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useSessionLifecycle } from "@/hooks/use-session-lifecycle"
+import { focusFromCreateNode } from "@/hooks/use-context-notes"
 
 const NOTHING_CHANGED_TOOLTIP =
   "Nothing to close out yet — add or edit a node, or connect an edge, and this unlocks."
@@ -101,7 +102,11 @@ export function CanvasFooter() {
       </div>
       <button
         type="button"
-        onClick={() => addNode(screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))}
+        onClick={() => {
+          const node = addNode(screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+          // A created node becomes the focus (context capture §5.2).
+          focusFromCreateNode(node.id)
+        }}
         className="rounded-lg px-[13px] py-1.5 text-[12.5px]"
         style={{ color: "#5F574C", background: "none", border: "1px solid var(--tc-hairline-strong)" }}
       >

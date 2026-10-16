@@ -5,6 +5,8 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
+import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
+import { focusFromClick } from "@/hooks/use-context-notes"
 
 // Solid line + arrowhead like LogicalEdge, differentiated only by a small
 // pulsing "Q" badge at the midpoint — the highest-signal human mark: an open
@@ -65,6 +67,9 @@ export function QuestionEdge({
   }, [clicked])
 
   const revealed = !readOnly && clicked
+  // Focused component (context capture) — shares the composer's highlight.
+  const edgeFocused = useEdgeFocused(id)
+  const focused = !readOnly && edgeFocused
 
   return (
     <>
@@ -72,8 +77,8 @@ export function QuestionEdge({
         path={path}
         markerEnd={markerEnd}
         style={{
-          stroke: revealed ? "#2b2622" : "#6A6154",
-          strokeWidth: revealed ? 2 : 1.5,
+          stroke: focused ? "var(--tc-focus)" : revealed ? "#2b2622" : "#6A6154",
+          strokeWidth: revealed || focused ? 2 : 1.5,
           filter: revealed ? "drop-shadow(0 0 3px rgba(43,38,34,.45))" : undefined,
           transition: "stroke .15s ease, stroke-width .15s ease, filter .15s ease",
         }}
@@ -86,7 +91,10 @@ export function QuestionEdge({
           stroke="transparent"
           strokeWidth={20}
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
-          onClick={() => setClicked(true)}
+          onClick={() => {
+            setClicked(true)
+            focusFromClick({ kind: "edge", id })
+          }}
         />
       )}
       {revealed && (
@@ -117,6 +125,7 @@ export function QuestionEdge({
           Q
         </div>
       </EdgeLabelRenderer>
+      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} />
     </>
   )
 }

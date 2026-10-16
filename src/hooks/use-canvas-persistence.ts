@@ -7,6 +7,7 @@ import { canvasEvent, ghostStatus } from "@/lib/api"
 import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
 import type { EdgeType, RejectionReason } from "@/types"
+import { onComponentsDeleteCommitted, onComponentsRemoved, onComponentsRestored } from "@/hooks/use-context-notes"
 
 // How long a guarded delete stays undoable before it commits for real. Kept
 // as module state, not store state — it's a side-effect timer, not display
@@ -34,6 +35,18 @@ function nodeDeleteLabel(content: string): string {
   const firstLine = (content.split("\n")[0] ?? "").trim()
   if (!firstLine) return "Untitled node"
   return firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine
+}
+
+// Where a deleted edge was, for the "Why remove this?" prompt — the bend
+// point if it had one, else halfway between its endpoints' top-left corners
+// nudged toward their centres (good enough to read as "here").
+function edgeMidpoint(edge: CanvasEdge): { x: number; y: number } | null {
+  if (edge.bend) return edge.bend
+  const nodes = useCanvasStore.getState().nodes
+  const a = nodes.find((n) => n.id === edge.source)
+  const b = nodes.find((n) => n.id === edge.target)
+  if (!a || !b) return null
+  return { x: (a.position.x + a.width / 2 + b.position.x + b.width / 2) / 2, y: (a.position.y + b.position.y) / 2 + 40 }
 }
 
 function groupDeleteLabel(count: number): string {
@@ -605,8 +618,9 @@ export function useCanvasPersistence() {
     const edge = useCanvasStore
       .getState()
       .addEdge(source, target, edgeType, sourceHandle ?? undefined, targetHandle ?? undefined)
-    if (!edge) return // source/target already connected — nothing to persist
+    if (!edge) return undefined // source/target already connected — nothing to persist
     attemptEdgeWrite(edge)
+    return edge
   }
 
   // Shared by persistEdge (right after drawing) and retryPendingEdges (once
@@ -703,6 +717,10 @@ export function useCanvasPersistence() {
     // floating with a trigger that no longer exists. This is cleanup, not an
     // accept/reject decision, but resolve() is the store's only removal
     // action either way.
+    // Context capture (§5.7): a draft open on it moves to the canvas bar, and
+    // "Why remove this?" appears where it was. Before removeNode, so the
+    // cascaded edges can still be found.
+    onComponentsRemoved("node", [nodeId], nodeDeleteLabel(node.data.content), node.position)
     useCanvasStore.getState().removeNode(nodeId)
     useGhostStore.getState().resolve(nodeId)
 
@@ -720,6 +738,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted([nodeId], connectedEdges.map((e) => e.id))
       void commitNodeDelete(node, connectedEdges)
     }, DELETE_UNDO_WINDOW_MS)
     pendingNodeDeleteTimers.set(nodeId, timer)
@@ -732,6 +751,7 @@ export function useCanvasPersistence() {
       pendingNodeDeleteTimers.delete(nodeId)
     }
     useCanvasStore.getState().restoreNode(node, connectedEdges)
+    onComponentsRestored([nodeId])
     if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }
@@ -795,6 +815,7 @@ export function useCanvasPersistence() {
     // call repeatedly: an edge between two targets is already gone by the
     // time the second endpoint's removeNode call runs, so that pass is a
     // no-op for it.
+    onComponentsRemoved("node", targets.map((n) => n.id), groupDeleteLabel(targets.length), targets[0].position)
     for (const node of targets) {
       useCanvasStore.getState().removeNode(node.id)
       useGhostStore.getState().resolve(node.id)
@@ -812,6 +833,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted(targets.map((n) => n.id), connectedEdges.map((e) => e.id))
       void commitNodesDelete(targets, connectedEdges)
     }, DELETE_UNDO_WINDOW_MS)
     pendingGroupDeleteTimers.set(batchKey, timer)
@@ -824,6 +846,7 @@ export function useCanvasPersistence() {
       pendingGroupDeleteTimers.delete(batchKey)
     }
     useCanvasStore.getState().restoreNodes(nodes, edges)
+    onComponentsRestored(nodes.map((n) => n.id))
     if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }
@@ -951,6 +974,7 @@ export function useCanvasPersistence() {
       return
     }
 
+    onComponentsRemoved("edge", [edgeId], edgeDeleteLabel(edge.edgeType).toLowerCase(), edgeMidpoint(edge))
     useCanvasStore.getState().removeEdge(edgeId)
 
     useCanvasUiStore.getState().setPendingDelete({
@@ -964,6 +988,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted([edgeId])
       void commitEdgeDelete(edge)
     }, DELETE_UNDO_WINDOW_MS)
     pendingEdgeDeleteTimers.set(edgeId, timer)
@@ -976,6 +1001,7 @@ export function useCanvasPersistence() {
       pendingEdgeDeleteTimers.delete(edgeId)
     }
     useCanvasStore.getState().restoreEdge(edge)
+    onComponentsRestored([edgeId])
     if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }

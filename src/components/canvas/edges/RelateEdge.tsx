@@ -5,6 +5,8 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
+import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
+import { focusFromClick } from "@/hooks/use-context-notes"
 
 // Dashed line with a midpoint ◇ — "how are these two related?" It stays
 // visible while the articulation ghost is still forming (empty frame), and
@@ -60,6 +62,9 @@ export function RelateEdge({
   }, [clicked])
 
   const revealed = !readOnly && clicked
+  // Focused component (context capture) — shares the composer's highlight.
+  const edgeFocused = useEdgeFocused(id)
+  const focused = !readOnly && edgeFocused
   // The edge's midpoint diamond — small, outlined; always drawn, so it stays
   // on the edge whether or not a ghost pair is pending off it.
   const diamondSize = 10
@@ -72,8 +77,8 @@ export function RelateEdge({
         path={path}
         markerEnd={markerEnd}
         style={{
-          stroke: revealed ? "#2b2622" : "#6A6154",
-          strokeWidth: revealed ? 2 : 1.5,
+          stroke: focused ? "var(--tc-focus)" : revealed ? "#2b2622" : "#6A6154",
+          strokeWidth: revealed || focused ? 2 : 1.5,
           strokeDasharray: "6 4",
           filter: revealed ? "drop-shadow(0 0 3px rgba(43,38,34,.45))" : undefined,
           transition: "stroke .15s ease, stroke-width .15s ease, filter .15s ease",
@@ -87,7 +92,10 @@ export function RelateEdge({
           stroke="transparent"
           strokeWidth={20}
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
-          onClick={() => setClicked(true)}
+          onClick={() => {
+            setClicked(true)
+            focusFromClick({ kind: "edge", id })
+          }}
         />
       )}
       {revealed && (
@@ -128,6 +136,7 @@ export function RelateEdge({
           />
         </div>
       </EdgeLabelRenderer>
+      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} />
     </>
   )
 }

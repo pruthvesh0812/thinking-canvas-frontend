@@ -24,6 +24,14 @@
   --tc-amber-ink: #8a6a28;
   --tc-amber-ink-strong: #6b4f1b;
 
+  /* Context capture focus colour — the focused component and its anchored
+     composer share it (outline + pointer). Deliberately not amber (amber
+     means the AI) and never the only cue: the chip and pointer name the
+     target too. The canvas context bar stays neutral, never this colour. */
+  --tc-focus: #3f6db3;
+  --tc-focus-soft: rgba(63, 109, 179, 0.1);
+  --tc-focus-ink: #2f558f;
+
   /* Backdrop switcher (CanvasFooter's sibling control) — the chalkboard
      option only ever paints the ReactFlow pane itself, never node cards or
      chrome, so these two tokens are all it needs. */
@@ -171,5 +179,17 @@ body {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+  }
+}
+
+/* "Making room" for the context composer: displaced nodes glide down and
+   back. Never while being dragged (React Flow adds .dragging), and never
+   with reduced motion — they still make room, just without animation. */
+.tc-scope .react-flow__node.tc-room:not(.dragging) {
+  transition: transform 0.22s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-scope .react-flow__node.tc-room {
+    transition: none !important;
   }
 }
