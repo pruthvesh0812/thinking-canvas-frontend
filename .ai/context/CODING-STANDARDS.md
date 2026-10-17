@@ -120,6 +120,26 @@ See `STATE-MANAGEMENT.md` for the store layout. Summary:
 
 Default: **no comments.** Don't restate what well-named code already says.
 
+**Plain words, always.** The "next reader" is the human on this project, not
+another model. Every comment that IS written (required or not) must read like
+something you'd say out loud to a teammate — short sentences, everyday words,
+one idea at a time. If a comment needs its own glossary (stacked qualifiers,
+nested clauses, three abbreviations in one line), rewrite it simpler before
+it's committed, even if that means splitting it into two shorter comments.
+
+```typescript
+// ✅ Plain
+// Wait 2.5s after the last edit before asking the backend about this node —
+// gives the human time to keep typing instead of asking too early.
+const DWELL_MS = 2_500
+
+// ❌ Dense — technically correct, but nobody reads this in one pass
+// Debounce window for the trigger-ruleset dwell-gate heuristic; a stand-in
+// action-class proxy for cursor/pointer telemetry absent from this codebase,
+// deliberately orthogonal to backend-side maturity adjudication.
+const DWELL_MS = 2_500
+```
+
 Two places where comments are REQUIRED:
 
 **1. Contract seams.** Anywhere this repo touches the backend contract or a

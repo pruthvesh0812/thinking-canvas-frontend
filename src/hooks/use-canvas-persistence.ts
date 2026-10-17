@@ -4,7 +4,15 @@ import { useGhostStore, hasQuestionGhost, type GhostPairSlot, type GhostPairStat
 import { useSessionStore } from "@/stores/session-store"
 import { supabase } from "@/lib/supabase"
 import { canvasEvent, ghostStatus } from "@/lib/api"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
+import {
+  GHOST_WIDTH,
+  contentNodeRect,
+  ghostCardRect,
+  ghostPositions,
+  ghostPositionsFromEdge,
+  relateAnchorSourceHandle,
+  type Rect,
+} from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
 import type { EdgeType, RejectionReason } from "@/types"
 
@@ -150,9 +158,53 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   // Exactly the condition Canvas.tsx's relateEndpoints uses, so what
   // acceptance persists can't disagree with what the ghost showed.
   const relateEndpoints = pair.triggerEdgeId && nodeA && nodeB ? ([nodeA, nodeB] as const) : undefined
+  // Same estimate (and the same obstacle set, minus this pair's own
+  // anchor(s)) Canvas.tsx used to place the pending ghost — keeps the
+  // accepted node landing exactly where the ghost was hanging.
+  //
+  // The obstacle SET must also match Canvas.tsx's `visibleStoreNodes`, not
+  // the raw store: a set-aside node stays in `nodes` but is hidden from the
+  // live canvas (and so was never an obstacle the pending ghost had to dodge)
+  // unless the "show set aside" toggle is on — using the unfiltered list here
+  // made the accepted node dodge nodes the ghost itself never saw, landing it
+  // somewhere else entirely. Never in history (ghost acceptance doesn't
+  // happen there), so isHistory's session filter doesn't apply.
+  const showSetAside = useCanvasUiStore.getState().showSetAside
+  const realObstacles = (excludeIds: string[]): Rect[] =>
+    nodes
+      .filter((n) => !excludeIds.includes(n.id) && (showSetAside || !n.data.setAsideAt))
+      .map((n) => contentNodeRect(n.position.x, n.position.y, n.width, n.data.content, n.height))
+  // Any OTHER still-pending pair is also an obstacle this one's ghost had to
+  // dodge (Canvas.tsx accumulates exactly this across pairs in its render
+  // loop) — approximated here at one level deep (each other pair positioned
+  // against real nodes only, not against pairs beyond it) rather than
+  // reproducing Canvas.tsx's full iteration order, which matches exactly
+  // whenever at most two pairs are pending at once (the common case) and is
+  // a close approximation beyond that.
+  const otherPairRects: Rect[] = []
+  for (const [otherTriggerId, otherPair] of Object.entries(useGhostStore.getState().pairs)) {
+    if (otherTriggerId === triggerNodeId) continue
+    const [otherA, otherB] = otherPair.anchorNodeIds
+    const otherNodeA = otherA ? nodes.find((n) => n.id === otherA) : undefined
+    const otherNodeB = otherB ? nodes.find((n) => n.id === otherB) : undefined
+    const otherEndpoints = otherPair.triggerEdgeId && otherNodeA && otherNodeB ? ([otherNodeA, otherNodeB] as const) : undefined
+    const otherContextText = otherPair.articulations ? otherPair.articulations.join("\n") : otherPair.contextText
+    const otherQuestionText = hasQuestionGhost(otherPair) ? otherPair.questionText : undefined
+    const otherObstacles = realObstacles(otherPair.anchorNodeIds)
+    const otherPos = otherEndpoints
+      ? ghostPositionsFromEdge([otherEndpoints[0], otherEndpoints[1]], otherContextText, otherQuestionText, otherObstacles)
+      : ghostPositions(nodes.find((n) => n.id === otherTriggerId), otherContextText, otherQuestionText, otherObstacles)
+    otherPairRects.push(ghostCardRect(otherPos.context.x, otherPos.context.y, GHOST_WIDTH.context, otherContextText))
+    if (otherQuestionText !== undefined) {
+      otherPairRects.push(ghostCardRect(otherPos.question.x, otherPos.question.y, GHOST_WIDTH.question, otherQuestionText))
+    }
+  }
+  const contextDisplayText = pair.articulations ? pair.articulations.join("\n") : pair.contextText
+  const questionDisplayText = questionExists ? pair.questionText : undefined
+  const obstacles = [...realObstacles(pair.anchorNodeIds), ...otherPairRects]
   const positions = relateEndpoints
-    ? ghostPositionsFromEdge([relateEndpoints[0], relateEndpoints[1]])
-    : ghostPositions(nodes.find((n) => n.id === triggerNodeId))
+    ? ghostPositionsFromEdge([relateEndpoints[0], relateEndpoints[1]], contextDisplayText, questionDisplayText, obstacles)
+    : ghostPositions(nodes.find((n) => n.id === triggerNodeId), contextDisplayText, questionDisplayText, obstacles)
 
   // The relate edge this pair replaced — still on the canvas (Canvas.tsx
   // only hides it while pending, never deletes it up front) so its handle
@@ -174,14 +226,20 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
   // midpoint diamond, RelateEdge) rather than rendering as straight logical
   // edges — visual/data only: they never fire edge.created, so this can't
   // re-trigger the articulator, and the leg-delete prompt is shape-based.
+  // targetHandle is always "left-target" either way — GhostContextNode's one
+  // named target handle, whether the drop-line came from a single trigger
+  // node or (relate case) either of two anchors. Without it, the settled
+  // edge falls back to React Flow's default handle resolution instead of the
+  // exact left/right shape the ghost edge showed while pending.
   const contextEdges = relateEndpoints
     ? pair.anchorNodeIds.map((from) => ({
         ...pair.descriptor.context_edge,
         edge_type: "relate" as const,
         from,
         sourceHandle: relateAnchorSourceHandle(from, originalRelateEdge),
+        targetHandle: "left-target",
       }))
-    : [pair.descriptor.context_edge]
+    : [{ ...pair.descriptor.context_edge, sourceHandle: "right-source", targetHandle: "left-target" }]
 
   // 1. Insert accepted node(s) + connecting edge(s), owner:'ai', reusing
   //    the ghost UUID as the node id — landed at the same spot the ghost
@@ -246,7 +304,9 @@ async function resolveGhostPair(triggerNodeId: string, pair: GhostPairState, que
       pair.questionText,
       positions.question,
       GHOST_WIDTH.question,
-      [pair.descriptor.question_edge],
+      // Same fixed left-to-right shape the ghost edge used (context's
+      // right-source into the question ghost's left-target).
+      [{ ...pair.descriptor.question_edge, sourceHandle: "right-source", targetHandle: "left-target" }],
       ids,
     )
   }
@@ -307,7 +367,7 @@ async function materializeAcceptedGhost(
   content: string,
   position: { x: number; y: number },
   width: number,
-  edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
+  edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string; targetHandle?: string }>,
   ids: { canvasId: string; sessionId: string },
 ): Promise<boolean> {
   const { error: nodeError } = await supabase.from("nodes").insert({
@@ -332,11 +392,9 @@ async function materializeAcceptedGhost(
     session_id: ids.sessionId,
     from_node_id: spec.from,
     to_node_id: spec.to,
-    // Same bare-side-only convention as writeEdge's handleSide — a `relate`
-    // pair's specs carry the replaced edge's matching side (contextEdges
-    // above); a node-triggered spawn never sets one.
+    // Same bare-side-only convention as writeEdge's handleSide.
     from_handle: handleSide(spec.sourceHandle),
-    to_handle: null,
+    to_handle: handleSide(spec.targetHandle),
     edge_type: spec.edge_type,
     both_existing: false,
   }))
@@ -365,9 +423,11 @@ async function materializeAcceptedGhost(
       source: row.from_node_id,
       target: row.to_node_id,
       edgeType: row.edge_type,
-      // The compound "<side>-source" id, not the DB's bare-side row above —
-      // React Flow needs it to actually connect at that handle.
+      // The compound "<side>-source"/"<side>-target" id, not the DB's
+      // bare-side row above — React Flow needs it to actually connect at
+      // that handle.
       sourceHandle: edgeSpecs[i].sourceHandle,
+      targetHandle: edgeSpecs[i].targetHandle,
       synced: true,
     })),
   )

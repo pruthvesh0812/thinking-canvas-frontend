@@ -106,17 +106,20 @@ export function useIntervention() {
   }, [offerState?.offer.id, offerState?.phase, offerState?.timerMs])
 
   // Clears the local "generating" placeholder once a real outcome lands: the
-  // ghost pair this offer led to finished streaming (the acceptance-gate UI
-  // takes over from here), or the offer itself was withdrawn (aborted on
+  // ghost pair this offer led to actually spawned onto the canvas (its own
+  // dashed drawing-on frame + halo is the affordance from here — this bottom
+  // strip would only double up on it, same as use-intervention-demo.ts's
+  // generate() flipping straight to "idle" the instant it calls
+  // ghostStore.spawn()), or the offer itself was withdrawn (aborted on
   // re-judge, or expired) — whichever happens first. Both selectors are
   // called unconditionally (rules of hooks) with the conditional folded into
   // the selector body instead. Clearing happens directly in the render body
   // (React's "adjust state during render" pattern), not inside a useEffect —
   // the guard itself (`processing &&`) stops it from repeating once cleared,
   // so there's no cascading-render risk to route through an effect for.
-  const pairStreamed = useGhostStore((s) => !!processing && !!s.pairs[processing.triggerNodeId]?.streamed)
+  const pairSpawned = useGhostStore((s) => !!processing && !!s.pairs[processing.triggerNodeId])
   const offerStillPending = useInterventionStore((s) => (processing ? !!s.offers[processing.triggerNodeId] : true))
-  if (processing && (pairStreamed || !offerStillPending)) {
+  if (processing && (pairSpawned || !offerStillPending)) {
     setProcessing(null)
   }
 

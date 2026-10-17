@@ -26,6 +26,7 @@ const DWELL_MS = 2_500
 export function useInterventionTrigger(enabled: boolean) {
   const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dwellNodeId = useRef<string | null>(null)
+
   // Baseline content per node — lets a genuine edit be told apart from every
   // OTHER reason the store's `nodes` array reference changes (drag position,
   // resize, a different node's own edit). Seeded from the current snapshot
@@ -36,12 +37,13 @@ export function useInterventionTrigger(enabled: boolean) {
   const triggeredNodeIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) return // only for live canvas
 
     for (const node of useCanvasStore.getState().nodes) {
       if (node.data.synced) lastContentByNode.current.set(node.id, node.data.content)
     }
-
+  
+    // clear the dwell timer and the dwell node id
     function clearDwell() {
       if (dwellTimer.current) {
         clearTimeout(dwellTimer.current)

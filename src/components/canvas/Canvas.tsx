@@ -30,7 +30,15 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
+import {
+  GHOST_WIDTH,
+  contentNodeRect,
+  ghostCardRect,
+  ghostPositions,
+  ghostPositionsFromEdge,
+  relateAnchorSourceHandle,
+  type Rect,
+} from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
@@ -267,6 +275,20 @@ function CanvasInner() {
 
     const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
     const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
+    // Every real node is a potential obstacle a ghost pair must clear
+    // (ghost-layout.ts's settleClearOfObstacles) — keyed by id so a pair can
+    // cheaply exclude its OWN trigger/anchor node(s) below (the ghost is
+    // SUPPOSED to sit right next to those, inside the normal gap).
+    const realNodeRectsById = new Map(
+      visibleStoreNodes.map((n) => [n.id, contentNodeRect(n.position.x, n.position.y, n.width, n.data.content, n.height)]),
+    )
+    // Ghost pairs already placed earlier in this same loop — so a second
+    // (rare, but possible: one pending pair per node, and several nodes can
+    // each have one at once) concurrent pair doesn't land on top of the
+    // first. Order-dependent (first pair in iteration order wins the
+    // uncontested spot), which is an acceptable tradeoff for how rare
+    // concurrent pairs are.
+    const placedGhostRects: Rect[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
       // A `relate`-triggered Articulator pair hangs below the midpoint of its
       // edge's two endpoints, not next to a single trigger node. Its diamond
@@ -274,7 +296,28 @@ function CanvasInner() {
       // anchor node — and the ghost's drop-lines (edges memo below) run from
       // BOTH endpoints straight to the ghost card.
       const endpoints = relateEndpoints(pair, nodesById)
-      const pos = endpoints ? ghostPositionsFromEdge(endpoints) : ghostPositions(nodesById.get(triggerNodeId))
+      // Articulator readings render as a list, not the raw marker-tagged
+      // text, but they take up the same vertical space — estimate against
+      // whichever one is actually on screen (GhostNodeCard's own branch).
+      const contextDisplayText = pair.articulations ? pair.articulations.join("\n") : pair.contextText
+      const questionDisplayText = hasQuestionGhost(pair) ? pair.questionText : undefined
+      // Acceptance reuses a ghost's own id for the real node it materializes
+      // into (use-canvas-persistence.ts), and only removes the pair from
+      // ghost-store afterward — so for one brief render, BOTH a real node and
+      // this ghost can exist at the same id. Without excluding them, the
+      // ghost sees its own just-materialized self sitting exactly where it
+      // wants to be, dodges it, and then snaps back the instant the pair
+      // resolves — the flicker/jump this guards against.
+      const ownGhostIds = [pair.descriptor.context_node.ghost_id, pair.descriptor.question_node?.ghost_id]
+      const excludedIds = new Set([...pair.anchorNodeIds, ...ownGhostIds])
+      const obstacles = [
+        ...[...realNodeRectsById.entries()].filter(([id]) => !excludedIds.has(id)).map(([, rect]) => rect),
+        ...placedGhostRects,
+      ]
+      const pos = endpoints
+        ? ghostPositionsFromEdge(endpoints, contextDisplayText, questionDisplayText, obstacles)
+        : ghostPositions(nodesById.get(triggerNodeId), contextDisplayText, questionDisplayText, obstacles)
+      placedGhostRects.push(ghostCardRect(pos.context.x, pos.context.y, GHOST_WIDTH.context, contextDisplayText))
       ghostNodes.push({
         id: pair.descriptor.context_node.ghost_id,
         type: "ghostContext",
@@ -290,7 +333,8 @@ function CanvasInner() {
         deletable: false,
         style: { width: GHOST_WIDTH.context },
       })
-      if (hasQuestionGhost(pair)) {
+      if (questionDisplayText !== undefined) {
+        placedGhostRects.push(ghostCardRect(pos.question.x, pos.question.y, GHOST_WIDTH.question, questionDisplayText))
         ghostNodes.push({
           id: pair.descriptor.question_node!.ghost_id,
           type: "ghostQuestion",
@@ -373,6 +417,7 @@ function CanvasInner() {
             source: a.id,
             sourceHandle: relateAnchorSourceHandle(a.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
+            targetHandle: "left-target",
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
           },
@@ -381,6 +426,7 @@ function CanvasInner() {
             source: b.id,
             sourceHandle: relateAnchorSourceHandle(b.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
+            targetHandle: "left-target",
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
           },
@@ -389,7 +435,12 @@ function CanvasInner() {
         ghostEdges.push({
           id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
           source: triggerNodeId,
+          // The context ghost always sits to the trigger's right
+          // (ghost-layout.ts) — leave from the trigger's right side, enter
+          // the ghost's left.
+          sourceHandle: "right-source",
           target: pair.descriptor.context_node.ghost_id,
+          targetHandle: "left-target",
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "context" },
         })
@@ -398,7 +449,11 @@ function CanvasInner() {
         ghostEdges.push({
           id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.descriptor.question_node!.ghost_id}`,
           source: pair.descriptor.context_node.ghost_id,
+          // The question ghost always sits to the context ghost's right
+          // (ghost-layout.ts) — same left-to-right handle pairing.
+          sourceHandle: "right-source",
           target: pair.descriptor.question_node!.ghost_id,
+          targetHandle: "left-target",
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "question" },
         })

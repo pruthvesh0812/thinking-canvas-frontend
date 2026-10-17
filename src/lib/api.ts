@@ -97,7 +97,7 @@ export function sessionComplete(payload: SessionCompletePayload) {
 // `withdraw` SSE messages, not this response, are what actually drive the
 // presentation-gate UI (use-ghost-stream.ts → intervention-store.ts).
 export function interventionTrigger(payload: InterventionTriggerPayload) {
-  return post<InterventionTriggerResponse>("/intervention/trigger", payload)
+  return post<InterventionTriggerResponse>("/api/intervention/trigger", payload)
 }
 
 // POST /intervention/process — call when the presentation-gate timer
@@ -105,13 +105,13 @@ export function interventionTrigger(payload: InterventionTriggerPayload) {
 // 'manual') — it feeds the show ruleset's attention state, so never default
 // or coalesce it.
 export function interventionProcess(payload: InterventionProcessPayload) {
-  return post<{ ok: true }>("/intervention/process", payload)
+  return post<{ ok: true }>("/api/intervention/process", payload)
 }
 
 // POST /intervention/dismiss — the user waved the offer off before its
 // timer resolved. Receptivity signal only; fire-and-forget like canvasEvent.
 export function interventionDismiss(payload: InterventionDismissPayload) {
-  return post<{ ok: true }>("/intervention/dismiss", payload)
+  return post<{ ok: true }>("/api/intervention/dismiss", payload)
 }
 
 // No wrapper for POST /api/observer-edge-status — the schema exists in the

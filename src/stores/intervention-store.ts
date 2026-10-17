@@ -43,8 +43,19 @@ interface InterventionStore {
   reset(): void
 }
 
+// `seq` numbers a JUDGMENT, not each SSE frame — `waiting` and the `offer`
+// that later confirms the same judgment share one seq (confirmed live: both
+// arrived as seq 1 for the same offer id). Comparing seq unconditionally
+// treats that second, same-offer message as a stale duplicate of itself, so
+// `offer` never lands and the store's phase is stuck at "waiting" forever
+// (DebounceIndicator's timer pill never hands off, even once the ghost pair
+// has fully streamed). Only compare seq across DIFFERENT offers — that's the
+// actual case this guards: a re-judged offer superseding what was parked for
+// the same trigger node.
 function isStale(existing: InterventionOfferState | undefined, incoming: InterventionOffer): boolean {
-  return existing !== undefined && incoming.seq <= existing.offer.seq
+  if (!existing) return false
+  if (existing.offer.id === incoming.id) return false
+  return incoming.seq <= existing.offer.seq
 }
 
 function findByOfferId(
