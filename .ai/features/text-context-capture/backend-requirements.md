@@ -11,11 +11,12 @@ status: requested — nothing below exists in thinking-canvas-api yet
 > **Concrete schema + ER diagram: [`schema.md`](./schema.md)** — that file is the
 > source of truth for tables/columns; this one lists the asks by priority.
 >
-> **Rev 2 (2026-10-17) overrides this file where they differ:** no decision-log
-> table (B4 → only `component_removals` for B5); no `edge_prompts` table (B8 →
-> `edges.clarification_status` + SSE `edge_clarification`); settings live in a
-> global `system_config` (B7); **no server drafts (B10 dropped — localStorage
-> only)**; attachments are file columns on `context_entries`.
+> **[`schema.md`](./schema.md) rev 3 (2026-10-17) overrides this file wherever they
+> differ.** Summary: no decision log; `component_removals` for "Why remove this?";
+> nodes/edges stay hard-deleted; links use `target_type` / `target_id` (no FK) /
+> `origin_status` (OWNED|MOVED) / `state` (active|deleted); attachments in their own
+> `context_attachments` table (one file per entry); `edges.clarification_status`
+> instead of a prompts table; global `system_config`; no server drafts.
 
 The frontend v1 is built against a **local stand-in repository**
 (`src/lib/context-repository.ts`, browser `localStorage`, per canvas) that

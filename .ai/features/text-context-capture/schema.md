@@ -2,34 +2,38 @@
 feature: "text-context-capture"
 type: schema-proposal
 created: 2026-10-17
-revised: 2026-10-17 (rev 2 — after review with @Pruthvesh)
-status: PROPOSED — frontend's expectation, needs backend sign-off
+revised: 2026-10-17 (rev 3 — decisions from @Pruthvesh)
+status: AGREED on the frontend side — needs backend sign-off
 ---
 
-# Text-Only Context Capture — expected schema (rev 2)
+# Text-Only Context Capture — expected schema (rev 3)
 
-## What changed in rev 2
+## Decisions so far
 
-| Rev 1 | Rev 2 | Why |
-|---|---|---|
-| `context_decisions` (general audit log) | **Removed.** Replaced by a small `component_removals` table | Note history is already on the rows themselves (`deleted_at`, removed links kept with `removed_at`, `origin='user_moved'`). The only thing with nowhere else to live is the "Why remove this?" answer. |
-| `edge_prompts` table | **Removed.** Replaced by `edges.clarification_status` | The "?" is a property of the edge. The backend sets it and pushes an SSE message, and a reload reads it with the edge row. |
-| `context_settings` table | **Renamed and widened:** global `system_config` | One place for every tunable number (context, edges, later others). |
-| `context_drafts` table | **Removed** | No cross-device drafts for now. Drafts stay in browser `localStorage` only (already how the frontend works). |
-| `context_attachments` (later, separate table) | **File columns on `context_entries`** | An attachment *is* a context entry; it just needs a place for the file link. |
+| Topic | Decision |
+|---|---|
+| Audit log (`context_decisions`) | **Dropped.** |
+| "Why remove this?" answers | **`component_removals` table.** Nodes and edges stay **hard-deleted**; no `deleted_at` / `delete_reason` on them. |
+| Link liveness | `context_links.state = 'active' \| 'deleted'`: `deleted` when the link was removed, its entry was deleted, or its node/edge was deleted. |
+| Link origin | `context_links.origin_status = 'OWNED' \| 'MOVED'`. |
+| Naming | `target_kind` → **`target_type`**. |
+| Attachments | **Separate `context_attachments` table**, holding `entry_id` (option B). **One file per entry in v1.** |
+| "?" on edges | `edges.clarification_status` + SSE message. No separate table. |
+| Tunables | Global `system_config` table. |
+| Drafts | Browser `localStorage` only. **No drafts table.** |
 
 ## Tables at a glance
 
 | Table / change | Priority |
 |---|---|
-| `context_entries` (notes, voice, attachments) | P0 |
+| `context_entries` | P0 |
 | `context_links` | P0 |
 | `nodes.seq` + `canvases.next_node_seq` | P0 |
 | `edges.clarification_status` | P1 |
 | `component_removals` | P1 |
 | `system_config` | P1 |
+| `context_attachments` | Table now; used after voice mode |
 | `edges.label` | P2 |
-| Attachment columns on `context_entries` | Columns now, used after voice mode |
 
 ---
 
@@ -43,14 +47,16 @@ erDiagram
     CANVASES ||--o{ EDGES : contains
     NODES ||--o{ EDGES : "from / to"
 
-    CANVASES ||--o{ CONTEXT_ENTRIES : "has notes"
+    CANVASES ||--o{ CONTEXT_ENTRIES : "has context"
     SESSIONS |o--o{ CONTEXT_ENTRIES : "written in"
     AUTH_USERS ||--o{ CONTEXT_ENTRIES : authors
 
     CONTEXT_ENTRIES ||--|{ CONTEXT_LINKS : "applies to (1..n)"
-    NODES ||--o{ CONTEXT_LINKS : "target when kind=node"
-    EDGES ||--o{ CONTEXT_LINKS : "target when kind=edge"
-    CANVASES ||--o{ CONTEXT_LINKS : "target when kind=canvas"
+    NODES |o..o{ CONTEXT_LINKS : "target_id when target_type=node (no FK)"
+    EDGES |o..o{ CONTEXT_LINKS : "target_id when target_type=edge (no FK)"
+    CANVASES ||--o{ CONTEXT_LINKS : "scope; target when target_type=canvas"
+
+    CONTEXT_ENTRIES ||--o| CONTEXT_ATTACHMENTS : "file (v1: 0..1)"
 
     CANVASES ||--o{ COMPONENT_REMOVALS : "why-remove answers"
 
@@ -78,33 +84,41 @@ erDiagram
         uuid author_id FK
         text source "typed | spoken | attachment"
         text content "note text, or caption for a file"
-        text file_path "storage object path - attachments only"
-        text file_name "attachments only"
-        text mime_type "attachments only"
-        bigint size_bytes "attachments only"
-        text scan_status "pending | clean | rejected"
-        text alt_text "screen-reader description"
         timestamptz created_at
         timestamptz updated_at
-        timestamptz deleted_at "soft delete"
+        timestamptz deleted_at "user deleted the entry"
     }
     CONTEXT_LINKS {
         uuid id PK "client-generated"
         uuid entry_id FK
         uuid canvas_id FK
-        text target_kind "canvas | node | edge"
-        uuid node_id FK "set iff kind=node"
-        uuid edge_id FK "set iff kind=edge"
-        text origin "user_chosen | user_moved | shortcut"
-        text state "active | removed"
+        text target_type "canvas | node | edge"
+        uuid target_id "node/edge id; null for canvas - NO FK"
+        text origin_status "OWNED | MOVED"
+        text state "active | deleted"
         timestamptz created_at
-        timestamptz removed_at
+        timestamptz updated_at
+    }
+    CONTEXT_ATTACHMENTS {
+        uuid id PK
+        uuid entry_id FK "unique in v1"
+        uuid canvas_id FK
+        text storage_path "private bucket object path"
+        text file_name
+        text mime_type
+        bigint size_bytes
+        int width "images only"
+        int height "images only"
+        text scan_status "pending | clean | rejected"
+        text alt_text
+        uuid uploaded_by FK
+        timestamptz created_at
     }
     COMPONENT_REMOVALS {
         uuid id PK
         uuid canvas_id FK
         uuid session_id FK
-        text component_kind "node | edge"
+        text component_type "node | edge"
         uuid component_id "NO FK - it is deleted"
         text component_label "snapshot e.g. n4 - Pricing"
         text reason
@@ -123,95 +137,139 @@ erDiagram
 
 ## 2. Tables
 
-### 2.1 `context_entries` — one piece of context: typed, spoken, or a file (P0)
+### 2.1 `context_entries` — one piece of context (P0)
 
-**Why it exists:** the spec asks for one store for typed notes, voice transcripts and
-attachments, differing only by `source`. Agents read one table with one set of rules.
+**Why:** one store for typed notes, voice transcripts and attachments,
+differing only by `source` (spec §5.9, §8).
 
 | Column | Type | Rule |
 |---|---|---|
-| `id` | uuid PK | Client-generated, like nodes/edges, so the UI is optimistic and there's no read-back. |
+| `id` | uuid PK | Client-generated, so the UI is optimistic with no read-back. |
 | `canvas_id` | FK → canvases, cascade | Ownership and RLS. |
-| `session_id` | FK → sessions, set null, nullable | Which session it was written in. |
+| `session_id` | FK → sessions, set null, nullable | Session it was written in. |
 | `author_id` | FK → auth.users | |
 | `source` | text, check in (`typed`,`spoken`,`attachment`) | |
-| `content` | text, nullable, ≤ 1000 chars | Note text. For an attachment it is the optional caption. Never rewritten by the system. |
-| `file_path` | text, nullable | **The file link.** The object path in a private Supabase Storage bucket, e.g. `context/<canvas_id>/<entry_id>/<file_name>`. |
-| `file_name`, `mime_type`, `size_bytes` | nullable | Shown as the file chip (name, type, size) in the panel. |
-| `scan_status` | text, nullable, check in (`pending`,`clean`,`rejected`) | Spec: "files are checked for safety before anyone can open them". Only `clean` files are openable or sent to agents. |
-| `alt_text` | text, nullable | Spec: "every attachment has a name or description that a screen reader can read." |
+| `content` | text, nullable, ≤ 1000 chars | Required for `typed`/`spoken`. Optional caption for `attachment`. Never rewritten by the system. |
 | `created_at`, `updated_at` | timestamptz | |
-| `deleted_at` | timestamptz, nullable | Soft delete, so undo works. **Agents never read a row with this set.** |
+| `deleted_at` | timestamptz, nullable | The **user deleted this entry** (undoable). |
 
 ```sql
-check (
-  (source in ('typed','spoken') and content is not null and char_length(content) between 1 and 1000
-     and file_path is null) or
-  (source = 'attachment' and file_path is not null and file_name is not null
-     and mime_type is not null and size_bytes is not null)
-)
+check (source = 'attachment' or (content is not null and char_length(content) between 1 and 1000))
 ```
 
-**How attachments work:**
-- **One file = one entry.** Three files dropped at once are three entries. Each can be linked, moved, deleted and undone on its own, exactly like a note, and each counts once in the badge.
-- **Store the path, not a URL.** The bucket is private. The frontend asks for a short-lived signed URL when the user opens or previews the file. A stored public URL would leak, and a stored signed URL would expire.
-- **Upload flow:**
-  1. Frontend uploads to Storage at `context/<canvas_id>/<entry_id>/…`.
-  2. Frontend inserts the entry with `scan_status='pending'` and its links.
-  3. Frontend notifies `context.created`.
-  4. Backend scans the file and sets `clean` or `rejected`.
-  5. Backend prepares the file for agents (thumbnails, OCR, text extraction).
-- Storage RLS on the bucket uses the same canvas-owner rule as the tables.
-- Allowed types, sizes and per-plan limits are values in `system_config`, not schema.
-
-If the backend expects many-files-per-entry later, these columns move out to a
-`context_files(entry_id, …)` table. Until then, inline is simpler.
+**Why keep `deleted_at` here when links also have `state`:** it records *why*
+the entry is gone. "The user deleted the note" and "the node it was on was
+deleted" both make the links `deleted`. Only the first is undone by "restore
+note", so the restore needs to tell them apart.
 
 **Relationships:**
 - `canvases` 1—N `context_entries`
 - `sessions` 1—N `context_entries` (optional)
 - `auth.users` 1—N `context_entries`
 - `context_entries` 1—1..N `context_links`
+- `context_entries` 1—0..1 `context_attachments`
 
-### 2.2 `context_links` — where a piece of context applies (P0)
+### 2.2 `context_links` — where an entry applies (P0)
 
-**Why it exists:**
-- A note and what it points at are separate things (spec: "one entry can have many links; a link can be moved or removed without changing the text").
-- `/all` is **one entry + N links**, not N copies, so one undo removes it everywhere and agents see it on every node.
-- v2 group notes are just more links.
+**Why:** a note and what it points at are separate. `/all` is **one entry + N
+links**, so one undo removes it everywhere and agents see it on each node.
+v2 group notes are just more links.
 
 | Column | Type | Rule |
 |---|---|---|
 | `id` | uuid PK | Client-generated. |
 | `entry_id` | FK → context_entries, cascade | |
-| `canvas_id` | FK → canvases, cascade | Denormalised so RLS and per-canvas queries don't need a join. |
-| `target_kind` | text, check in (`canvas`,`node`,`edge`) | `canvas` = the "Canvas context" bar. |
-| `node_id` | FK → nodes, **on delete cascade**, nullable | Set iff `target_kind='node'`. |
-| `edge_id` | FK → edges, **on delete cascade**, nullable | Set iff `target_kind='edge'`. |
-| `origin` | text, check in (`user_chosen`,`user_moved`,`shortcut`) | How the link came to be. |
-| `state` | text, check in (`active`,`removed`) | `removed` = moved away or unlinked. The row is kept, so the move is undoable and its history is visible. |
-| `created_at`, `removed_at` | timestamptz | |
+| `canvas_id` | FK → canvases, cascade | For RLS and per-canvas queries without a join. |
+| `target_type` | text, check in (`canvas`,`node`,`edge`) | `canvas` = the "Canvas context" bar. |
+| `target_id` | uuid, nullable, **no FK** | The node or edge id. Null iff `target_type = 'canvas'`. |
+| `origin_status` | text, check in (`OWNED`,`MOVED`) | `OWNED` = written there directly. `MOVED` = the user moved it there ("a move is recorded as a user decision", §5.5). |
+| `state` | text, check in (`active`,`deleted`), default `active` | `deleted` when the link is removed, its entry is deleted, or its node/edge is deleted. |
+| `created_at`, `updated_at` | timestamptz | `updated_at` bumps on move and on state change. |
 
 ```sql
-check (
-  (target_kind = 'canvas' and node_id is null and edge_id is null) or
-  (target_kind = 'node'   and node_id is not null and edge_id is null) or
-  (target_kind = 'edge'   and edge_id is not null and node_id is null)
-)
+check ((target_type = 'canvas') = (target_id is null))
+
 create unique index context_links_one_active
-  on context_links (entry_id, target_kind, coalesce(node_id, edge_id, canvas_id))
+  on context_links (entry_id, target_type, coalesce(target_id, canvas_id))
   where state = 'active';
+create index context_links_target on context_links (target_type, target_id) where state = 'active';
 ```
 
-- **Move:** old link → `removed` + `removed_at`, then insert a new link with `origin='user_moved'`. Undo flips them back. The old row (removed, with its timestamp) and the new row (`user_moved`) together are the record of the move.
-- **Component deleted:** the cascade removes its links, so notes go with it. The frontend's 5 s undo window happens before the node row is deleted, so an undone delete never touches the database.
+**Why `target_id` has no foreign key (a consequence of your decisions):**
+- Nodes and edges are hard-deleted, and we want the link row to stay behind as `state='deleted'`.
+- A foreign key would either delete the link along with the node, so there'd be no row left to mark, or empty out `target_id`, so we'd lose which node it was.
+- So the link keeps the id with no FK, and a database trigger marks it `deleted` when its node or edge is deleted.
 
-### 2.3 `nodes.seq` + `canvases.next_node_seq` — node numbers (P0)
+```sql
+-- When a node/edge row is hard-deleted, its links go 'deleted'.
+create function context_links_on_target_delete() returns trigger language plpgsql as $$
+begin
+  update context_links set state = 'deleted', updated_at = now()
+   where target_type = TG_ARGV[0] and target_id = old.id and state = 'active';
+  return old;
+end $$;
+create trigger nodes_context_links_delete after delete on nodes
+  for each row execute function context_links_on_target_delete('node');
+create trigger edges_context_links_delete after delete on edges
+  for each row execute function context_links_on_target_delete('edge');
+```
 
-**Why:**
-- `@n2` and the `n3` label need a number that is unique per canvas, never reused and never renumbered, and that arrives with the node data.
-- A counter on the canvas is needed because "highest number + 1" would reuse a deleted node's number.
-- Not related to `sessions.latest_seq`.
+**Every action and what it does to the links:**
+
+| Action | Links |
+|---|---|
+| Save note on n2 | insert 1 link, `OWNED`, `active` |
+| `/all` note | insert N links, `OWNED`, `active` |
+| Move note n2 → n5 | update in place: `target_id = n5`, `origin_status = 'MOVED'` |
+| Undo move | update back: `target_id = n2`, previous `origin_status` (the frontend holds both during the undo window) |
+| Delete note | `entries.deleted_at = now()` + all its active links → `deleted` (one RPC) |
+| Undo delete note | `deleted_at = null` + links back to `active`, **only those whose node/edge still exists** |
+| Node/edge deleted | trigger: its links → `deleted` (the frontend deletes the row only after its 5 s undo window, so an undone delete never reaches the DB) |
+| Unlink one node from a group note (v2) | that link → `deleted` |
+
+**What `active` means to readers:** badge counts, the panel list and agents
+read only `state = 'active'` links of entries with `deleted_at is null`.
+
+### 2.3 `context_attachments` — the file behind an attachment entry (option B)
+
+**Why a separate table:** it keeps `context_entries` free of file columns. The
+file data (path, type, size, scan) lives only here.
+
+| Column | Type | Rule |
+|---|---|---|
+| `id` | uuid PK | |
+| `entry_id` | FK → context_entries, **cascade**, **unique (v1)** | The owning entry. Unique enforces one file per entry; drop the unique index later to allow several. |
+| `canvas_id` | FK → canvases, cascade | RLS. |
+| `storage_path` | text | Object path in a **private** Supabase Storage bucket, `context/<canvas_id>/<entry_id>/<file_name>`. The frontend gets a short-lived signed URL to open it. Never store a public URL. |
+| `file_name`, `mime_type`, `size_bytes` | text, text, bigint | The file chip in the panel. |
+| `width`, `height` | int, nullable | Images only: lets the panel reserve space for the thumbnail before it loads. |
+| `scan_status` | text, check in (`pending`,`clean`,`rejected`) | Safety scan. Only `clean` files can be opened or sent to agents. |
+| `alt_text` | text, nullable | Screen-reader description (spec §6.4). |
+| `uploaded_by` | FK → auth.users | |
+| `created_at` | timestamptz | |
+
+**Why option B (`entry_id` on the attachment row):**
+- Deleting the entry deletes its attachment row automatically, so no file rows are left behind.
+- Allowing several files per entry later is just dropping one unique index.
+
+**One file per entry (v1):** three files dropped at once make three entries, each
+with its own link, badge count, move, delete and undo, as the spec describes
+attachments. Storage cost is identical either way: one object per file.
+
+**Upload flow:**
+1. The frontend uploads the file to Storage.
+2. RPC `create_context_entry` inserts the entry (`source='attachment'`), its links, and the attachment row with `scan_status='pending'`.
+3. The frontend notifies `context.created`.
+4. The backend scans the file and sets `clean` or `rejected`.
+5. The backend prepares the file for agents.
+
+The bucket's storage rules use the same canvas-owner rule.
+
+### 2.4 `nodes.seq` + `canvases.next_node_seq` — node numbers (P0)
+
+**Why:** `@n2` and the `n3` label need a number that is unique per canvas, never
+reused, and arrives with the node. A counter is needed because "highest number
++ 1" would reuse a deleted node's number.
 
 ```sql
 alter table canvases add column next_node_seq int not null default 1;
@@ -231,75 +289,56 @@ create trigger nodes_assign_seq before insert on nodes
   for each row execute function assign_node_seq();
 ```
 
-- Assigned by a database trigger, because the frontend inserts nodes directly. The frontend reads it back with `insert(...).select('seq')` and in hydration.
-- Backfill existing nodes per canvas in `created_at` order.
+- Assigned by a trigger, because the frontend inserts nodes directly. It's read back via `insert(...).select('seq')` and in hydration.
+- Backfill existing nodes in `created_at` order.
 
-### 2.4 `edges.clarification_status` — the "?" on an edge (P1)
-
-**Why it lives on `edges`:** it is a property of the edge. It comes back with the
-edge row on reload, it's pushed live over SSE, and it dies with the edge. No
-extra table.
+### 2.5 `edges.clarification_status` — the "?" (P1)
 
 ```sql
 alter table edges
-  add column clarification_status text
-    check (clarification_status in ('needed','dismissed','answered')),
+  add column clarification_status text check (clarification_status in ('needed','dismissed','answered')),
   add column clarification_updated_at timestamptz;
 ```
 
-| Value | Meaning | Who sets it |
+| Value | Meaning | Set by |
 |---|---|---|
-| `null` | Never asked | Default |
-| `needed` | Show the "?" and a "Needs you" item | **Backend**, when the edge qualifies: no label, no note, and ~10 s have passed (from `system_config`). It also pushes SSE `{ type: 'edge_clarification', edge_id, status: 'needed' }`. |
-| `dismissed` | User skipped it; **never ask again** | Frontend (update on the edge row) |
-| `answered` | User wrote a note or label for it | Frontend, or the backend on `context.created` for that edge |
+| `null` | Never asked | default |
+| `needed` | Show the "?" and a "Needs you" item | **Backend**: no label, no active note, and `edge.clarification_delay_ms` passed since creation. It also pushes SSE `{ type: 'edge_clarification', edge_id, status: 'needed' }`. |
+| `dismissed` | User skipped it; never ask again | Frontend |
+| `answered` | A note or label was added | Frontend, or the backend on `context.created` for the edge |
 
-**Why it's a status and not a boolean:** a single `needs_clarification` true/false
-can't tell "never asked" apart from "user dismissed it". The spec says a dismissed
-edge "is not asked again unless the user opens it". With only a boolean, the
-backend would flip it back to true on the next check. One text column with three
-values covers it.
+- The frontend hides the "?" while that edge is focused.
+- The frontend shows at most `edge.needs_you_max_visible` at once.
 
-**Two things to agree on:**
-- **Timing.** The backend doesn't know the user's focus. It times from edge creation (or the last edit). The frontend hides the "?" while that edge is focused, which keeps the spec's "only after the user has moved on".
-- **Cap of 3 visible.** The backend may set as many edges to `needed` as qualify. The frontend shows at most `edge.needs_you_max_visible` of them at once. That's a display cap, read from config.
-- **SSE:** `edge_clarification` is a new `RedisMessage` type. The frontend already ignores unknown types safely, so it can ship in either order.
+### 2.6 `component_removals` — "Why remove this?" (P1)
 
-### 2.5 `component_removals` — "Why remove this?" answers (P1)
-
-**Why it exists:** the spec requires the answer to be "stored as a record linked to
-the deleted component, never on a component that still exists". The node/edge row
-is hard-deleted, so the answer cannot be a column on it. It needs its own row
-that outlives the component.
+**Why its own table:** nodes and edges are hard-deleted, and the spec requires the
+answer be stored against the deleted component, never on one that still
+exists. This row outlives the component.
 
 | Column | Type | Rule |
 |---|---|---|
 | `id` | uuid PK | |
 | `canvas_id` | FK → canvases, cascade | |
 | `session_id` | FK → sessions, set null | |
-| `component_kind` | text, check in (`node`,`edge`) | |
+| `component_type` | text, check in (`node`,`edge`) | Same wording as `target_type`. |
 | `component_id` | uuid, **no FK** | The component is gone, by design. |
-| `component_label` | text | Snapshot (e.g. `n4 · Pricing`) so the record is readable after the row is gone. |
+| `component_label` | text | Snapshot (`n4 · Pricing`) so the record stays readable. |
 | `reason` | text, 1–1000 chars | |
 | `created_by` | FK → auth.users | |
 | `created_at` | timestamptz | |
 
-Written only when the user actually types a reason. Ignoring the prompt writes nothing.
+Written only when the user types a reason.
 
-### 2.6 `system_config` — global tunables (P1)
-
-**Why:** the spec's bracketed numbers must change without a release, and edges and
-other features have their own knobs. So this is one global key/value table,
-namespaced by feature.
+### 2.7 `system_config` — global tunables (P1)
 
 ```sql
 create table system_config (
-  key text primary key,          -- 'context.note_max_chars'
+  key text primary key,
   value jsonb not null,
   description text,
   updated_at timestamptz not null default now()
 );
--- RLS: select for authenticated users; insert/update for service role only.
 ```
 
 | key | default |
@@ -315,68 +354,69 @@ create table system_config (
 | `attachment.allowed_mime_types` | later |
 | `attachment.max_size_bytes` | later |
 
-The frontend reads all keys once on load. The existing `NEXT_PUBLIC_CONTEXT_*`
-env values remain only as a fallback.
+Readable by authenticated users; writable by service role only. The frontend reads all keys on load.
 
-### 2.7 `edges.label` (P2)
+### 2.8 `edges.label` (P2)
 
 ```sql
 alter table edges add column label text check (char_length(label) <= 80);
 ```
-- The spec has a short label typed on the edge itself (the edge, not a note).
-- A labelled edge doesn't qualify for clarification.
+The spec has a short label typed on the edge itself. A labelled edge doesn't qualify for clarification.
 
-### Not in the database (decided)
+### Not in the database
 
-- **Drafts:** browser `localStorage` only, per canvas. They survive refresh and lost connection; no cross-device drafts. This is already implemented.
-- **Edit history of notes:** agents see only the latest text (spec). `updated_at` tells that an edit happened, and the previous text isn't kept. Undo of an edit is handled on the client during the undo window.
+- **Drafts:** browser `localStorage` only.
+- **Note edit history:** agents see only the latest text.
+- **Where a note was moved from:** `origin_status = 'MOVED'` says *that* it moved, not from where.
 
 ---
 
 ## 3. RLS
 
-The same boundary as today, **the canvas owner**, on every new table and column:
+The canvas owner, as today:
 ```sql
 using (exists (select 1 from canvases c where c.id = <t>.canvas_id and c.user_id = auth.uid()))
 ```
-- `context_entries` / `context_links`: select / insert / update. No client hard delete; deletes are soft.
+- `context_entries`, `context_links`, `context_attachments`: select / insert / update. No client hard delete.
 - `component_removals`: insert + select.
-- `edges.clarification_status`: the owner may update it to `dismissed` / `answered`. Setting `needed` is the backend's job (service role).
+- `edges.clarification_status`: the owner may set `dismissed` / `answered`. `needed` is backend-only (service role).
 - `system_config`: select for authenticated users.
-- Storage bucket `context`: read/write only under `context/<canvas_id>/…` for that canvas's owner.
+- Storage bucket `context`: owner-only under `context/<canvas_id>/…`.
 
 ## 4. What agents read
 
 ```sql
 create view agent_context as
-select e.id as entry_id, e.canvas_id, e.source, e.content, e.file_path, e.mime_type,
-       e.created_at, e.updated_at, l.target_kind, l.node_id, l.edge_id
+select e.id as entry_id, e.canvas_id, e.source, e.content,
+       a.storage_path, a.mime_type,
+       l.target_type, l.target_id, l.origin_status,
+       e.created_at, e.updated_at
 from context_entries e
-join context_links  l on l.entry_id = e.id
+join context_links l      on l.entry_id = e.id and l.state = 'active'
+left join context_attachments a on a.entry_id = e.id
 where e.deleted_at is null
-  and l.state = 'active'
-  and (e.source <> 'attachment' or e.scan_status = 'clean');
+  and (e.source <> 'attachment' or a.scan_status = 'clean');
 ```
-- A `/all` entry appears once per linked node.
-- Rows with `target_kind='canvas'` feed the rolling canvas summary.
+- A `/all` entry appears once per node.
+- `target_type = 'canvas'` rows feed the rolling canvas summary.
 
-## 5. Writes the frontend will make (write-then-notify)
+## 5. Writes the frontend makes (write-then-notify)
 
 | Action | Supabase write | Notify `POST /api/canvas-event` |
 |---|---|---|
-| Save note / attach file | RPC `create_context_entry(entry, links[])` (after Storage upload for a file) | `context.created` |
+| Save note / attach file | RPC `create_context_entry(entry, links[], attachment?)` | `context.created` |
 | Edit | update `content`, `updated_at` | `context.updated` |
-| Delete / undo | `deleted_at = now()` / `null` | `context.deleted` / `context.restored` |
-| Move / undo | RPC `move_context_link(link_id, kind, target_id)` | `context.moved` |
+| Delete note | RPC `delete_context_entry(entry_id)` (sets `deleted_at` + links → `deleted`) | `context.deleted` |
+| Undo delete | RPC `restore_context_entry(entry_id)` | `context.restored` |
+| Move / undo move | update the link: `target_id`, `origin_status` | `context.moved` |
 | Dismiss "?" | `edges.clarification_status = 'dismissed'` | none |
 | "Why remove this?" | insert `component_removals` | none |
 
-The two RPCs keep the multi-row writes atomic, so a failure can't leave a note
-with no links.
+The RPCs keep multi-row writes atomic.
 
 ## 6. Open questions for the backend
 
-1. Is the `node_id` / `edge_id` FK approach OK, versus a polymorphic `target_id`?
-2. Is a trigger OK for `nodes.seq`?
-3. Is the `edge_clarification` SSE message shape OK? Time from edge creation, or from last edit?
-4. One file per entry (inline columns): OK for the voice/attachment plan?
+1. Is a trigger OK for `nodes.seq`?
+2. Is the trigger that marks links `deleted` when their node/edge is deleted OK?
+3. Is the `edge_clarification` SSE message shape OK? Time from edge creation?
+4. Storage bucket name/path convention and the scan mechanism for attachments.
