@@ -5,10 +5,22 @@
 - You can test either way:
   - Mock: `NEXT_PUBLIC_USE_MOCK_PERSISTENCE=true` — the seeded Retention canvas, numbered n1–n6.
   - Real: open a real canvas.
-- Notes live in browser `localStorage` for now (blocker.md BL-1). To start clean, clear site data, or delete the `tc.context.v1.*`, `tc.context-drafts.v1.*` and `tc.context.*` keys.
+- Notes live in browser `localStorage` for now (blocker.md BL-1). To start clean, clear site data, or delete the `tc.context.v2.*` and `tc.context-drafts.v1.*` keys. (Notes saved before slice S01 used `tc.context.v1.*` and are no longer read.)
 - Defaults under test (spec brackets): composer and bar 5 lines, `#` list 5 rows, 1,000 characters per note, 4 lines before "Show more", "?" after 10 s, 3 "Needs you" items visible, "Why remove this?" for 10 s.
 
 Mark each line ✅ or ❌, with a note.
+
+---
+
+## Slice S01 — types mirror + rev-3 names (regression only, mock mode)
+Nothing should look or behave differently. Run these once:
+1. Save a note on a node, on an edge and in the canvas bar → each shows in the panel with the right badge.
+2. Move a note to another node, then Undo → it goes there and comes back.
+3. Edit a note, then Undo → text returns. Delete a note, then Undo → it returns.
+4. Delete a node that has a note, wait out the undo toast → the note no longer shows on that node. Answer "Why remove this?" → "Reason saved".
+5. `/all` and `@n2` shortcuts still save to the right nodes.
+6. Real canvas (local DB, not required to have the new migrations): ghosts still stream in and the connection stays open (no console warnings every ~25 s).
+7. Expected, not a bug: notes saved before this slice are gone (storage key changed).
 
 ---
 

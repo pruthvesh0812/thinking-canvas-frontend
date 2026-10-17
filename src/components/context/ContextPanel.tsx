@@ -16,7 +16,7 @@ import {
 } from "@/hooks/use-context-notes"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { CONTEXT_SETTINGS, SMALL_SCREEN_QUERY } from "@/lib/context-settings"
-import type { ContextEntry } from "@/lib/context-contract"
+import type { ContextEntry } from "@/types"
 import { NodeMatchList } from "./NodeMatchList"
 
 // Quick labels offered on "Why do these connect?" — optional, one tap saves
@@ -206,7 +206,7 @@ function NoteItem({
   const [mode, setMode] = useState<"read" | "edit" | "move">("read")
   const [expanded, setExpanded] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
-  const [editText, setEditText] = useState(note.content)
+  const [editText, setEditText] = useState(note.content ?? "")
   const [moveQuery, setMoveQuery] = useState("")
   const [moveIndex, setMoveIndex] = useState(0)
   const textRef = useRef<HTMLDivElement>(null)
@@ -238,7 +238,7 @@ function NoteItem({
             } else if (e.key === "Escape") {
               e.preventDefault()
               e.stopPropagation()
-              setEditText(note.content)
+              setEditText(note.content ?? "")
               setMode("read")
             }
           }}
@@ -283,7 +283,7 @@ function NoteItem({
         {linkCount > 1 && <span>· on {linkCount} nodes</span>}
         {mode === "read" && (
           <span className="ml-auto flex gap-2">
-            <ActionLink onClick={() => (setEditText(note.content), setMode("edit"))}>Edit</ActionLink>
+            <ActionLink onClick={() => (setEditText(note.content ?? ""), setMode("edit"))}>Edit</ActionLink>
             <ActionLink onClick={() => (setMoveQuery(""), setMoveIndex(0), setMode("move"))}>Move to</ActionLink>
             <ActionLink danger onClick={() => void deleteNote(note.id)}>
               Delete
@@ -292,7 +292,7 @@ function NoteItem({
         )}
         {mode === "edit" && (
           <span className="ml-auto flex gap-2">
-            <ActionLink onClick={() => (setEditText(note.content), setMode("read"))}>Cancel</ActionLink>
+            <ActionLink onClick={() => (setEditText(note.content ?? ""), setMode("read"))}>Cancel</ActionLink>
             <ActionLink onClick={() => void saveEdit()}>Save</ActionLink>
           </span>
         )}

@@ -27,7 +27,7 @@ not wait on them — it runs on the stand-in.
 
 ## Files
 New:
-- `src/lib/context-contract.ts` — PROVISIONAL contract types (delete on mirror sync)
+- ~~`src/lib/context-contract.ts`~~ — deleted in slice S01; types now come from the mirrored `types/index.ts`
 - `src/lib/context-repository.ts` — persistence seam (localStorage stand-in)
 - `src/lib/context-settings.ts` — every bracketed default, one place
 - `src/lib/make-room.ts` — display-only "making room" layout

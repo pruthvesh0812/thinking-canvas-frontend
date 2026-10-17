@@ -84,8 +84,8 @@ export function CanvasContextBar() {
     setSaving(true)
     const ids = liveNodeIds ? liveNodeIds.split(",") : []
     const result = bar.allMode
-      ? await saveNote(text, ids.map((id) => ({ kind: "node" as const, id })), "shortcut", `every node (${ids.length})`)
-      : await saveNote(text, [{ kind: "canvas", id: null }], "user_chosen", "canvas context")
+      ? await saveNote(text, ids.map((id) => ({ kind: "node" as const, id })), `every node (${ids.length})`)
+      : await saveNote(text, [{ kind: "canvas", id: null }], "canvas context")
     setSaving(false)
     if (!result.ok) {
       setFailed(true)

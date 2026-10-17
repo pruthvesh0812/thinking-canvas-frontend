@@ -23,3 +23,13 @@ Open a canvas in mock mode: add notes on a node, the canvas bar and an edge; mov
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- `types/index.ts`: full resync from backend commit `24a57d4` — everything above the "API payload types" banner is the backend file verbatim; the banner section stays hand-expanded (this repo has no zod).
+- `types/database.types.ts`: copied from the backend (has the new tables, `create_context_entry`, `nodes.seq`, `edges.label`; no `intervention_offers`).
+- `src/lib/context-contract.ts` deleted; `context-store`, `ContextPanel`, `use-context-notes`, `context-repository` import from `@/types`.
+- `saveNote` lost its `origin` parameter (links are always `OWNED`; a move is `MOVED`); `ComposerState.viaShortcut` removed.
+- `logDecision` / `decisions[]` removed; "Why remove this?" now writes a `ComponentRemoval`-shaped row to the stand-in.
+- Storage key `tc.context.v2.`. `ContextEntry.content` is now `string | null`; the panel and edit treat null as empty.
+- **One unplanned change:** the backend still sends `{type:'ping'}` every 25 s but dropped it from `RedisMessage`, so `use-ghost-stream.ts` now ignores it before the typed switch (otherwise it would log "unhandled message type" every 25 s).
+- Checks run: `npx tsc --noEmit` and `npm run lint` — both clean. Behaviour not tested (yours to do, see `test.md` → Slice S01).

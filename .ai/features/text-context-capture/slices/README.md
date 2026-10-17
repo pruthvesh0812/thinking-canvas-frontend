@@ -22,7 +22,7 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 
 | # | Slice | You can test | Needs DB | Status |
 |---|---|---|---|---|
-| [S01](./S01-contract-types.md) | Contract types mirror + rev-3 names *(plumbing only)* | App behaves exactly as before | No | not started |
+| [S01](./S01-contract-types.md) | Contract types mirror + rev-3 names *(plumbing only)* | App behaves exactly as before | No | **built — awaiting your review** |
 | [S02](./S02-node-numbers.md) | Node numbers (`n1…`) come from the database | Same numbers in two browsers; never reused | Yes | not started |
 | [S03](./S03-save-note-on-node.md) | Save a note on a node, for real | Note survives reload and shows elsewhere | Yes | not started |
 | [S04](./S04-edit-delete-undo-note.md) | Edit, delete and undo a note | Delete/undo round trip persists | Yes | not started |

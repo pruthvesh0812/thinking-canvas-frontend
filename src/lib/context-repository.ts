@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import type { ContextDecision, ContextEntry, ContextLink } from "@/lib/context-contract"
+import type { ComponentRemoval, ContextEntry, ContextLink } from "@/types"
 
 // Persistence seam for context entries, links, sequence numbers and drafts.
 //
@@ -13,7 +13,8 @@ import type { ContextDecision, ContextEntry, ContextLink } from "@/lib/context-c
 export interface ContextSnapshot {
   entries: ContextEntry[]
   links: ContextLink[]
-  decisions: ContextDecision[]
+  /** "Why remove this?" answers — stand-in for the component_removals table. */
+  removals: ComponentRemoval[]
   /** Node id → sequence number. Never pruned: a number is never reused, and
    * an undone delete brings its node (same id) back to the same number. */
   seqByNode: Record<string, number>
@@ -23,11 +24,12 @@ export interface ContextSnapshot {
   dismissedEdgePrompts: string[]
 }
 
-const PREFIX = "tc.context.v1."
+// v2: rev-3 shapes (target_type / origin_status). Old v1 data is not read.
+const PREFIX = "tc.context.v2."
 const DRAFTS_PREFIX = "tc.context-drafts.v1."
 
 function emptySnapshot(): ContextSnapshot {
-  return { entries: [], links: [], decisions: [], seqByNode: {}, nextSeq: 1, dismissedEdgePrompts: [] }
+  return { entries: [], links: [], removals: [], seqByNode: {}, nextSeq: 1, dismissedEdgePrompts: [] }
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -92,9 +94,9 @@ export const contextRepository = {
     })
   },
 
-  logDecision(canvasId: string, decision: ContextDecision) {
+  insertComponentRemoval(canvasId: string, removal: ComponentRemoval) {
     return mutate(canvasId, (s) => {
-      s.decisions = [...s.decisions, decision]
+      s.removals = [...s.removals, removal]
     })
   },
 

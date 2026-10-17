@@ -14,13 +14,7 @@ import { contextRepository } from "@/lib/context-repository"
 import { CONTEXT_SETTINGS } from "@/lib/context-settings"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
-import type {
-  ContextDecisionAction,
-  ContextEntry,
-  ContextLink,
-  ContextLinkOrigin,
-  ContextTargetKind,
-} from "@/lib/context-contract"
+import type { ComponentRemoval, ContextEntry, ContextLink, ContextTargetType } from "@/types"
 
 // Orchestration for Text-Only Context Capture: focus + composer rules,
 // shortcuts, saving/editing/moving/deleting notes with one-step undo, edge
@@ -86,14 +80,13 @@ function targetExists(target: FocusTarget): boolean {
 
 export function openComposer(
   target: FocusTarget,
-  opts: { autoFocus?: boolean; previous?: FocusTarget | null; viaShortcut?: boolean } = {},
+  opts: { autoFocus?: boolean; previous?: FocusTarget | null; } = {},
 ) {
   const s = useContextStore.getState()
   s.setFocus(target)
   s.setComposer({
     target,
     previous: opts.previous,
-    viaShortcut: !!opts.viaShortcut,
     autoFocus: opts.autoFocus ?? true,
     openedAt: Date.now(),
   })
@@ -227,7 +220,6 @@ export function aimAtNode(
   openComposer(target, {
     autoFocus: true,
     previous: from.kind === "composer" ? from.target : null,
-    viaShortcut: true,
   })
   markShortcutUsed()
 }
@@ -348,24 +340,6 @@ function toast(message: string, undo?: () => void) {
   toastTimer = setTimeout(() => useContextStore.getState().clearToast(id), CONTEXT_SETTINGS.savedToastMs)
 }
 
-function logDecision(
-  action: ContextDecisionAction,
-  fields: { entry_id?: string | null; target_kind?: ContextTargetKind | null; target_id?: string | null; payload?: Record<string, unknown> },
-) {
-  void contextRepository
-    .logDecision(canvasKey(), {
-      id: crypto.randomUUID(),
-      canvas_id: canvasKey(),
-      action,
-      entry_id: fields.entry_id ?? null,
-      target_kind: fields.target_kind ?? null,
-      target_id: fields.target_id ?? null,
-      payload: fields.payload ?? {},
-      created_at: nowIso(),
-    })
-    .catch(() => {})
-}
-
 // A question to the AI typed into the canvas bar gets a gentle reminder —
 // never a block (§5.4).
 export function looksLikeQuestion(text: string): boolean {
@@ -388,8 +362,7 @@ export interface SaveResult {
  * draft and offers Retry (§8 "Failure"). */
 export async function saveNote(
   text: string,
-  links: { kind: ContextTargetKind; id: string | null }[],
-  origin: ContextLinkOrigin,
+  links: { kind: ContextTargetType; id: string | null }[],
   savedLabel: string,
 ): Promise<SaveResult> {
   const trimmed = text.trim()
@@ -414,11 +387,13 @@ export async function saveNote(
   const linkRows: ContextLink[] = links.map((l) => ({
     id: crypto.randomUUID(),
     entry_id: entry.id,
-    target_kind: l.kind,
+    canvas_id: canvasId,
+    target_type: l.kind,
     target_id: l.kind === "canvas" ? null : l.id,
-    origin,
+    origin_status: "OWNED",
     state: "active",
     created_at: now,
+    updated_at: now,
   }))
 
   const s = useContextStore.getState()
@@ -433,20 +408,14 @@ export async function saveNote(
     )
     return { ok: false, remainder }
   }
-  logDecision("note.created", {
-    entry_id: entry.id,
-    target_kind: links[0].kind,
-    target_id: links.length === 1 ? links[0].id : null,
-    payload: { link_count: links.length, origin },
-  })
   logger.info("[context] note saved", { entryId: entry.id, links: links.length })
 
   const lengthNote = remainder ? ` — first ${max.toLocaleString()} characters; the rest is still in the box` : ""
-  toast(`Saved to ${savedLabel}${lengthNote}`, () => void softDelete(entry.id, "undo"))
+  toast(`Saved to ${savedLabel}${lengthNote}`, () => void softDelete(entry.id))
   return { ok: true, remainder }
 }
 
-async function softDelete(entryId: string, reason: "undo" | "delete") {
+async function softDelete(entryId: string) {
   const s = useContextStore.getState()
   const at = nowIso()
   s.setEntries(
@@ -460,7 +429,6 @@ async function softDelete(entryId: string, reason: "undo" | "delete") {
     showNotice("Couldn't remove the note. Try again.")
     return false
   }
-  logDecision("note.deleted", { entry_id: entryId, payload: { reason } })
   return true
 }
 
@@ -480,12 +448,11 @@ async function restoreNote(entryId: string) {
     showNotice("Couldn't restore the note. Try again.")
     return
   }
-  logDecision("note.restored", { entry_id: entryId })
 }
 
 /** Panel "Delete" — gone for agents immediately; Undo restores (§7 Notes). */
 export async function deleteNote(entryId: string) {
-  if (await softDelete(entryId, "delete")) toast("Note deleted", () => void restoreNote(entryId))
+  if (await softDelete(entryId)) toast("Note deleted", () => void restoreNote(entryId))
 }
 
 /** Panel "Edit" — the edit stands; agents see only the latest version. */
@@ -494,6 +461,8 @@ export async function editNote(entryId: string, text: string): Promise<boolean> 
   const s = useContextStore.getState()
   const before = s.entries.find((e) => e.id === entryId)
   if (!before || !content || content === before.content) return true
+  // Attachment-only entries have no text (content is null); a text edit restores to "".
+  const previous = before.content ?? ""
   const apply = async (value: string) => {
     const now = nowIso()
     const st = useContextStore.getState()
@@ -506,14 +475,11 @@ export async function editNote(entryId: string, text: string): Promise<boolean> 
   try {
     await apply(content)
   } catch {
-    await apply(before.content).catch(() => {})
+    await apply(previous).catch(() => {})
     return false
   }
-  logDecision("note.edited", { entry_id: entryId })
   toast("Note edited", () => {
-    void apply(before.content)
-      .then(() => logDecision("note.edited", { entry_id: entryId, payload: { undo: true } }))
-      .catch(() => showNotice("Couldn't undo the edit."))
+    void apply(previous).catch(() => showNotice("Couldn't undo the edit."))
   })
   return true
 }
@@ -522,21 +488,24 @@ export async function editNote(entryId: string, text: string): Promise<boolean> 
  * another node; recorded as a user decision; one undo restores it. A note
  * linked to several nodes (`/all`) only moves off the one being viewed
  * (pm_handoff.md PM-9). */
-export async function moveNote(entryId: string, from: { kind: ContextTargetKind; id: string | null }, toNodeId: string) {
+export async function moveNote(entryId: string, from: { kind: ContextTargetType; id: string | null }, toNodeId: string) {
   const s = useContextStore.getState()
   const previous = s.links.filter((l) => l.entry_id === entryId)
+  const movedAt = nowIso()
   const moved: ContextLink = {
     id: crypto.randomUUID(),
     entry_id: entryId,
-    target_kind: "node",
+    canvas_id: canvasKey(),
+    target_type: "node",
     target_id: toNodeId,
-    origin: "user_moved",
+    origin_status: "MOVED",
     state: "active",
-    created_at: nowIso(),
+    created_at: movedAt,
+    updated_at: movedAt,
   }
   const isFrom = (l: ContextLink) =>
-    l.state === "active" && l.target_kind === from.kind && (from.kind === "canvas" || l.target_id === from.id)
-  const alreadyThere = previous.some((l) => l.state === "active" && l.target_kind === "node" && l.target_id === toNodeId)
+    l.state === "active" && l.target_type === from.kind && (from.kind === "canvas" || l.target_id === from.id)
+  const alreadyThere = previous.some((l) => l.state === "active" && l.target_type === "node" && l.target_id === toNodeId)
   const next = [...previous.filter((l) => !isFrom(l)), ...(alreadyThere ? [] : [moved])]
 
   const apply = async (links: ContextLink[]) => {
@@ -551,16 +520,8 @@ export async function moveNote(entryId: string, from: { kind: ContextTargetKind;
     showNotice("Couldn't move the note. Try again.")
     return
   }
-  logDecision("note.moved", {
-    entry_id: entryId,
-    target_kind: "node",
-    target_id: toNodeId,
-    payload: { from_kind: from.kind, from_id: from.id },
-  })
   toast(`Moved to ${seqLabel(toNodeId)}`, () => {
-    void apply(previous)
-      .then(() => logDecision("note.moved", { entry_id: entryId, payload: { undo: true } }))
-      .catch(() => showNotice("Couldn't undo the move."))
+    void apply(previous).catch(() => showNotice("Couldn't undo the move."))
   })
 }
 
@@ -627,7 +588,18 @@ export function saveRemovalReason(prompt: RemovalPrompt, reason: string) {
   // Stored against the deleted component itself — never against a
   // component that still exists (§5.7).
   for (const id of prompt.ids) {
-    logDecision("component.removal_reason", { target_kind: prompt.kind, target_id: id, payload: { reason: text } })
+    const row: ComponentRemoval = {
+      id: crypto.randomUUID(),
+      canvas_id: canvasKey(),
+      session_id: useSessionStore.getState().sessionId,
+      component_type: prompt.kind,
+      component_id: id,
+      component_label: prompt.label,
+      reason: text,
+      created_by: currentUserId,
+      created_at: nowIso(),
+    }
+    void contextRepository.insertComponentRemoval(canvasKey(), row).catch(() => {})
   }
   toast("Reason saved")
 }
@@ -674,10 +646,9 @@ function scheduleEdgePrompt(edgeId: string) {
 }
 
 export async function answerEdgePrompt(edgeId: string, text: string): Promise<boolean> {
-  const result = await saveNote(text, [{ kind: "edge", id: edgeId }], "user_chosen", targetLabel({ kind: "edge", id: edgeId }))
+  const result = await saveNote(text, [{ kind: "edge", id: edgeId }], targetLabel({ kind: "edge", id: edgeId }))
   if (!result.ok) return false
   removeEdgePrompt(edgeId)
-  logDecision("edge_prompt.answered", { target_kind: "edge", target_id: edgeId })
   return true
 }
 
@@ -687,7 +658,6 @@ export function dismissEdgePrompt(edgeId: string) {
   const s = useContextStore.getState()
   s.setDismissedEdgePrompts([...s.dismissedEdgePrompts, edgeId])
   void contextRepository.dismissEdgePrompt(canvasKey(), edgeId, true).catch(() => {})
-  logDecision("edge_prompt.dismissed", { target_kind: "edge", target_id: edgeId })
 }
 
 /** Opens the right-hand panel on a tab, stepping the threads rail aside —

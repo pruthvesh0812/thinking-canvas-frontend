@@ -225,7 +225,7 @@ function ComposerBody({ target }: { target: FocusTarget }) {
   async function save() {
     if (saving || !text.trim()) return
     setSaving(true)
-    const result = await saveNote(text, [{ kind: target.kind, id: target.id }], composer?.viaShortcut ? "shortcut" : "user_chosen", shortTargetLabel(target))
+    const result = await saveNote(text, [{ kind: target.kind, id: target.id }], shortTargetLabel(target))
     setSaving(false)
     if (!result.ok) {
       // The draft is kept; offer a retry (§8 "Failure").

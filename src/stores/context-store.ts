@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { ContextEntry, ContextLink, ContextTargetKind } from "@/lib/context-contract"
+import type { ContextEntry, ContextLink, ContextTargetType } from "@/types"
 
 /** A component that can hold focus (v1: nodes and edges — §4 "Component"). */
 export interface FocusTarget {
@@ -12,9 +12,6 @@ export interface ComposerState {
   /** Where the note was aimed before a shortcut retargeted it — the chip's
    * "back" action returns here. null = came from the canvas context bar. */
   previous: FocusTarget | null | undefined
-  /** True once a shortcut (@n / #) set this target — saved links record
-   * origin 'shortcut' instead of 'user_chosen'. */
-  viaShortcut: boolean
   /** Only the cursor-bearing openings (after node text, new edge, on
    * request, shortcut) take keyboard focus. Following focus on a click must
    * NOT steal the caret from whatever the user clicked into. */
@@ -188,10 +185,10 @@ type NotesSlice = Pick<ContextStore, "entries" | "links">
 
 /** Active notes on one target, newest first. Badge counts and the panel list
  * both come from here, so they always match (§8 "Counts"). */
-export function notesFor(s: NotesSlice, kind: ContextTargetKind, id: string | null): ContextEntry[] {
+export function notesFor(s: NotesSlice, kind: ContextTargetType, id: string | null): ContextEntry[] {
   const entryIds = new Set(
     s.links
-      .filter((l) => l.state === "active" && l.target_kind === kind && (kind === "canvas" || l.target_id === id))
+      .filter((l) => l.state === "active" && l.target_type === kind && (kind === "canvas" || l.target_id === id))
       .map((l) => l.entry_id),
   )
   return s.entries
@@ -199,7 +196,7 @@ export function notesFor(s: NotesSlice, kind: ContextTargetKind, id: string | nu
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
-export function noteCount(s: NotesSlice, kind: ContextTargetKind, id: string | null): number {
+export function noteCount(s: NotesSlice, kind: ContextTargetType, id: string | null): number {
   return notesFor(s, kind, id).length
 }
 
