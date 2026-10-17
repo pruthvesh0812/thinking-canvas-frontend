@@ -10,6 +10,12 @@ status: requested — nothing below exists in thinking-canvas-api yet
 
 > **Concrete schema + ER diagram: [`schema.md`](./schema.md)** — that file is the
 > source of truth for tables/columns; this one lists the asks by priority.
+>
+> **Rev 2 (2026-10-17) overrides this file where they differ:** no decision-log
+> table (B4 → only `component_removals` for B5); no `edge_prompts` table (B8 →
+> `edges.clarification_status` + SSE `edge_clarification`); settings live in a
+> global `system_config` (B7); **no server drafts (B10 dropped — localStorage
+> only)**; attachments are file columns on `context_entries`.
 
 The frontend v1 is built against a **local stand-in repository**
 (`src/lib/context-repository.ts`, browser `localStorage`, per canvas) that
