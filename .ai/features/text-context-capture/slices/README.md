@@ -10,7 +10,7 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 1. **One slice = one user-visible capability, built end to end** (UI → store →
    Supabase → database) so it can be tested on its own. No slice is "just the
    plumbing" except S01, which is called out as such.
-2. **One slice = one commit** on `ccr-dffed412-k09857`, message `Slice SNN: <title>`.
+2. **One slice = one commit**, message `Slice SNN: <title>`.
    Branch: `feature/context-capture-slices-2026-10-17T1500` (cut from `ccr-dffed412-k09857`). No PRs from me unless you ask.
 3. **Approval gate.** Before starting a slice I stop and wait for your "go". After
    finishing it I stop again, update that slice's *Test* section and `test.md`,
