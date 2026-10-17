@@ -8,6 +8,9 @@ status: requested — nothing below exists in thinking-canvas-api yet
 
 # Text-Only Context Capture — what the frontend needs from the backend
 
+> **Concrete schema + ER diagram: [`schema.md`](./schema.md)** — that file is the
+> source of truth for tables/columns; this one lists the asks by priority.
+
 The frontend v1 is built against a **local stand-in repository**
 (`src/lib/context-repository.ts`, browser `localStorage`, per canvas) that
 implements exactly the shapes below. When the backend ships these, the stand-in
