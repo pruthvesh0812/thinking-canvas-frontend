@@ -1,7 +1,8 @@
 # Blockers — Text-Only Context Capture
 
 Feature tracker: `.ai/features/text-context-capture/story.md`
-Backend asks in detail: `.ai/features/text-context-capture/backend-requirements.md`
+Backend asks in detail: `.ai/features/text-context-capture/backend-requirements.md` (schema: `schema.md` rev 3)
+Remaining frontend work: `.ai/features/text-context-capture/frontend-requirements.md`
 
 The frontend v1 is built and usable **without** these, on a local stand-in
 (browser `localStorage`, per canvas). Each blocker says what is stubbed today and

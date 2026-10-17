@@ -105,8 +105,7 @@ Group notes, suggestions from notes, thin-canvas hints (v2 §6.1–6.3); images/
 multi-author; rich text; shortcuts aimed at edges.
 
 ## Next steps
-1. Backend answers BL-1…BL-4 → replace `context-repository.ts` internals with Supabase writes + `canvas-event` notify; mirror types; delete `context-contract.ts`.
-2. Sequence numbers from `nodes.seq` in hydration; drop the local assigner.
-3. Settings endpoint → `context-settings.ts` reads it.
-4. Edge labels once `edges.label` exists.
-5. A11y audit with a screen reader.
+Schema is agreed on the frontend side as **`schema.md` rev 3**; the existing code predates it.
+The remaining frontend work (align to rev 3 → real Supabase persistence → P1 items → attachments)
+is written up for the next session in **[`frontend-requirements.md`](./frontend-requirements.md)**.
+Backend work list: [`backend-requirements.md`](./backend-requirements.md).
