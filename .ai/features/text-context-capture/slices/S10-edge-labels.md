@@ -1,4 +1,4 @@
-# S10 — Edge labels *(only if BK-4c says "now")*
+# S10 — Edge labels *(DEFERRED — decided "later")*
 
 **Goal:** type a short label on an edge (≤ 80 chars); a labelled edge never shows a "?".
 **Depends on:** S01, BK-4c. Recommended: **defer**.

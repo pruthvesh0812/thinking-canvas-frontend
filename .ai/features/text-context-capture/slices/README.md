@@ -11,13 +11,12 @@ there). Where this folder and the older docs disagree, **this folder wins**.
    Supabase → database) so it can be tested on its own. No slice is "just the
    plumbing" except S01, which is called out as such.
 2. **One slice = one commit** on `ccr-dffed412-k09857`, message `Slice SNN: <title>`.
-   (How the commits become PRs is blocker BK-2.)
+   Branch: `feature/context-capture-slices-2026-10-17T1500` (cut from `ccr-dffed412-k09857`). No PRs from me unless you ask.
 3. **Approval gate.** Before starting a slice I stop and wait for your "go". After
    finishing it I stop again, update that slice's *Test* section and `test.md`,
    and wait for your review before the next one.
 4. **I don't test on my own.** I run `tsc` and `lint` only. You test.
-5. **Nothing starts until the blockers in [`BLOCKERS.md`](./BLOCKERS.md) are
-   resolved, one by one.**
+5. All blockers in [`BLOCKERS.md`](./BLOCKERS.md) are resolved. Apply the three backend migrations to your local database before testing S02.
 
 ## Order
 
@@ -32,7 +31,8 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 | [S07](./S07-move-note.md) | Move a note | Move + undo; no duplicate | Yes | not started |
 | [S08](./S08-delete-component-with-notes.md) | Delete a node/edge that has notes + "Why remove this?" | Notes retire with their node; reason is stored | Yes | not started |
 | [S09](./S09-system-config.md) | Settings from `system_config` | Change a limit in the DB, UI follows | Yes | not started |
-| [S10](./S10-edge-labels.md) | Edge labels *(only if BK-4c says "now")* | Label an edge; no "?" on it | Yes | not started |
+| [S10](./S10-edge-labels.md) | Edge labels | — | Yes | **deferred** (decided: later) |
+| [S11](./S11-remove-intervention-demo.md) | Remove the intervention demo | The button and demo are gone; nothing else changes | No | not started |
 
 ## Parked (not in any slice)
 
@@ -40,7 +40,6 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 - Live updates over SSE (`context_changed`) — removed from v1; the `storage`-event tab sync stays.
 - Attachments upload/preview — table only on the backend, no bucket or scan.
 - Agents reading notes — not built on the backend.
-- Deleting the intervention demo — separate change, after BK-4b.
 - Voice mode.
 
 ## Template for every slice file

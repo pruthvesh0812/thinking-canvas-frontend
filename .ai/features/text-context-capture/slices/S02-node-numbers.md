@@ -2,13 +2,13 @@
 
 **Goal:** `n1, n2…` on nodes are assigned by the database, so two browsers show the same numbers and a number is never reused.
 **Why a slice:** end to end on its own — create a node, see its number, reload, see the same number. Needs no notes.
-**Depends on:** S01, BK-1, BK-4a.
+**Depends on:** S01; your local database with the three backend migrations applied.
 
 ## What changes
 - `use-canvas-persistence.ts`: node `upsert`/`insert` now `.select('id, seq')`; write the returned `seq` into the store. Never send `seq`. Duplicated nodes get their own new number.
 - `use-canvas-hydration.ts`: add `seq` to the nodes select; put it in the store.
 - `use-context-notes.ts` (`useContextLifecycle`): stop assigning numbers for real canvases; keep the browser assigner for mock mode (BK-3).
-- AI nodes (accepted ghosts) show a number per BK-4a.
+- AI nodes (accepted ghosts) show a number (decided: yes, same `nK` style as human nodes).
 
 ## Not in this slice
 Anything about notes.

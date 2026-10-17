@@ -1,5 +1,7 @@
 # Blockers before slice work starts
 
+**Status (2026-10-17): all resolved — S01 may start on your "go".**
+
 Resolve in this order. Each has my recommendation so you can answer with "yes" or
 a change. I will update the *Resolution* line as you answer. **No slice starts
 until BK-1 and BK-2 are resolved**; BK-3/BK-4 can resolve while S01 runs, but each
@@ -22,7 +24,7 @@ destructive and the shared project may still serve the deployed app. I can't run
 Supabase here (no database in this cloud session), so I can only write code
 against the documented schema; the first real round trip is yours to run (S03).
 
-Resolution: _open_
+Resolution: _Resolved: database is local; you run the migrations from the backend repo yourself (`npm run migrate:local` there, all three in order). S01 needs no database; apply them before testing S02._
 
 ## BK-2 — How a slice becomes a "commit or PR" *(blocks S01; owner: you)*
 
@@ -37,7 +39,7 @@ Options:
 Also: should the v1 UI already on this branch be treated as an **approved baseline**,
 or reviewed first? I'll assume baseline unless you say otherwise.
 
-Resolution: _open_
+Resolution: _Resolved: one new branch cut from `ccr-dffed412-k09857` — `feature/context-capture-slices-2026-10-17T1500`; one commit per slice, pushed there, no PRs from me. The v1 UI is the approved baseline._
 
 ## BK-3 — Keep the offline `localStorage` mode? *(blocks S03; owner: you)*
 
@@ -50,7 +52,7 @@ version today.
 - Or drop it for context notes once the database path works (less code, but notes
   don't work in mock mode and you lose offline demos).
 
-Resolution: _open_
+Resolution: _Resolved: keep the `localStorage` mode as a second repository implementation, minimal per slice._
 
 ## BK-4 — Three product questions from the backend *(owner: you)*
 
@@ -60,7 +62,7 @@ Resolution: _open_
 | 4b | Delete the intervention demo (`use-intervention-demo.ts`, `mock-intervention-scenario.ts`, `DebounceIndicator.tsx`, "Run the intervention" button)? The backend removed the feature. | nothing | **Yes, but as its own change** after the slices, so slice commits stay reviewable. |
 | 4c | Edge labels: build now (S10) or later? | S10 | **Later** — not in the spec's first release path; the "?" rule works without labels. |
 
-Resolution: _open_
+Resolution: _4a yes — AI nodes show `nK`. 4b yes — delete the demo, as its own slice (S11) at the end. 4c later — S10 is deferred._
 
 ## BK-5 — Types come from an unmerged branch *(blocks S01; I resolve, you confirm)*
 
@@ -70,7 +72,7 @@ exist only on the feature branch. Plan: mirror from the branch, record the exact
 commit SHA and "unmerged feature branch" in the provenance header, re-sync when
 it merges. The skill's repo name is stale; I'd fix that line in S01.
 
-Resolution: _proposed above — needs your OK_
+Resolution: _Resolved: mirror from the backend feature branch, record its SHA._
 
 ## BK-6 — Backend behaviour not verified against a real Supabase *(risk, not a blocker)*
 

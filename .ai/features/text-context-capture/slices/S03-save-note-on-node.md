@@ -2,7 +2,7 @@
 
 **Goal:** type a note under a focused node, press save, and it is stored in Supabase; reload or another browser shows the same note, badge and panel entry.
 **Why a slice:** the first full round trip (composer → store → `create_context_entry` → DB → hydration → badge/panel). It is also the BK-6 smoke test.
-**Depends on:** S01, S02, BK-1, BK-3.
+**Depends on:** S01, S02; local database.
 
 ## What changes
 - `context-repository.ts`: an interface with two implementations — Supabase (default) and `localStorage` (mock mode, if BK-3 keeps it).
