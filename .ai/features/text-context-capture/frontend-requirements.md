@@ -8,6 +8,8 @@ status: ready to pick up — Phase 1 needs no backend
 
 # Text-Only Context Capture — frontend work remaining
 
+> **Superseded for ordering:** work now follows vertical slices in [`slices/`](./slices/README.md), using the backend's `frontend-handoff.md`. Phases 1–3 below are reference only.
+
 ## Read first
 1. `CLAUDE.md` (repo rules). Key ones here:
    - write-then-notify;

@@ -1,0 +1,30 @@
+# S03 — Save a note on a node, for real
+
+**Goal:** type a note under a focused node, press save, and it is stored in Supabase; reload or another browser shows the same note, badge and panel entry.
+**Why a slice:** the first full round trip (composer → store → `create_context_entry` → DB → hydration → badge/panel). It is also the BK-6 smoke test.
+**Depends on:** S01, S02, BK-1, BK-3.
+
+## What changes
+- `context-repository.ts`: an interface with two implementations — Supabase (default) and `localStorage` (mock mode, if BK-3 keeps it).
+- Supabase `createEntry`: `supabase.rpc('create_context_entry', { p_entry: {id, canvas_id, session_id, source:'typed', content}, p_links: [{id, target_type:'node', target_id}] })`. Client-generated uuids for entry and link. `author_id`, timestamps not sent. No `canvas-event` notify.
+- Hydration: two flat queries (non-deleted entries; active links for the canvas), keep links whose entry is in the set; fill `context-store`. Page with `.range()` past 1000 rows.
+- `saveNote` always `OWNED`; drop `viaShortcut`.
+- Errors: `23514` (over limit / blank) → keep draft, show the message; any failure → keep draft, Retry reuses the **same** ids and **same** text. `42501` logged via `logger`.
+- Content stored exactly as typed.
+
+## Not in this slice
+Edit, delete, undo, move, canvas/edge targets, `/all`.
+
+## Test (for you)
+1. Focus a node, type a note, save → badge shows 1; panel lists it.
+2. Reload → still there. Open a second browser → same note and count.
+3. Go offline, save → draft kept, error + Retry; back online, Retry → exactly one note.
+4. Paste more than the limit → first part saved, rest stays as the next draft (PM-6).
+5. Try a blank note → rejected, draft kept.
+6. Mock mode: still works offline.
+
+## Done when
+`tsc` + `lint` clean; checks 1–5 pass against your database. If the RPC call shape misbehaves, we stop and report to the backend (BK-6).
+
+## Rollback
+Revert; stand-in storage is untouched.
