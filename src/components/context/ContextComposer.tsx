@@ -26,13 +26,12 @@ import { edgeCardOffset, handleAnchor } from "@/components/canvas/edges/bend-pat
 // attached to the node's bottom edge, a few px narrower than the node; on an
 // edge it is a card with a pointer, just below the edge's middle. It lives in
 // flow coordinates (ViewportPortal) so it rides along when its component is
-// dragged, and is counter-scaled so it stays a readable size at any zoom. It
+// dragged. A node's drawer scales with the canvas (so it always matches its
+// node's width); an edge's card is counter-scaled to stay readable. It
 // never slides — a focus change closes it here (a click elsewhere closes it;
 // the draft is kept). On a small screen it docks above the on-screen keyboard.
 
 const EDGE_COMPOSER_WIDTH = 300
-const NODE_DRAWER_MIN = 220
-const NODE_DRAWER_MAX = 320
 const NODE_DRAWER_INSET = 4
 const POINTER = 7
 
@@ -80,6 +79,10 @@ function useAnchor(target: FocusTarget): { x: number; y: number; nodeWidth: numb
 function AnchoredComposer({ target }: { target: FocusTarget }) {
   const anchor = useAnchor(target)
   const { zoom } = useViewport()
+  // A node's drawer is part of the node: it lives in flow space and scales and
+  // pans with it, so its width and place stay relative to the node at any
+  // zoom. An edge's card is counter-scaled to stay readable.
+  const isNode = target.kind === "node"
   const { getViewport, setViewport } = useReactFlow()
   const boxRef = useRef<HTMLDivElement>(null)
   const [shiftX, setShiftX] = useState(0)
@@ -87,15 +90,18 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
   const openedAt = useContextStore((s) => s.composer?.openedAt)
 
   // Report the box's screen size — Canvas uses it to move components that
-  // would be covered out of the way ("making room").
+  // would be covered out of the way ("making room"). A node's drawer is laid
+  // out in flow px, so it is scaled to screen px here.
   useLayoutEffect(() => {
     const el = boxRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setComposerSize({ width: el.offsetWidth, height: el.offsetHeight }))
+    const k = isNode ? zoom : 1
+    const report = () => setComposerSize({ width: el.offsetWidth * k, height: el.offsetHeight * k })
+    const ro = new ResizeObserver(report)
     ro.observe(el)
-    setComposerSize({ width: el.offsetWidth, height: el.offsetHeight })
+    report()
     return () => ro.disconnect()
-  }, [setComposerSize])
+  }, [setComposerSize, isNode, zoom])
 
   // Staying in view (§5.1): near a side edge the box shifts sideways (its
   // pointer stays on the component); if it would fall below/above the
@@ -103,7 +109,8 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
   useLayoutEffect(() => {
     const el = boxRef.current
     const pane = el?.closest(".react-flow")
-    if (!el || !pane || !anchor) return
+    // A node's drawer stays exactly under its node — no sideways shift.
+    if (!el || !pane || !anchor || isNode) return
     const r = el.getBoundingClientRect()
     const p = pane.getBoundingClientRect()
     const margin = 12
@@ -115,7 +122,7 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
     // Keep the pointer on the box.
     nextShift = Math.max(-(r.width / 2 - 24), Math.min(r.width / 2 - 24, nextShift))
     if (Math.abs(nextShift - shiftX) > 0.5) setShiftX(nextShift)
-  }, [anchor, shiftX])
+  }, [anchor, shiftX, isNode])
 
   useEffect(() => {
     // Wait a frame so the box has its real height.
@@ -145,13 +152,9 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
   }, [openedAt, anchor === null])
 
   if (!anchor) return null
-  const isNode = target.kind === "node"
   const pointer = isNode ? 0 : POINTER
-  // Under a node: node width minus a few px, kept within a readable range at
-  // any zoom (the box itself is counter-scaled, so this is screen px).
-  const width = isNode
-    ? Math.min(NODE_DRAWER_MAX, Math.max(NODE_DRAWER_MIN, (anchor.nodeWidth ?? 0) * zoom - NODE_DRAWER_INSET))
-    : EDGE_COMPOSER_WIDTH
+  // Under a node: always the node's own width minus a few px, at any zoom.
+  const width = isNode ? Math.max(0, (anchor.nodeWidth ?? 0) - NODE_DRAWER_INSET) : EDGE_COMPOSER_WIDTH
   return (
     <ViewportPortal>
       <div
@@ -160,7 +163,7 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
           position: "absolute",
           left: 0,
           top: 0,
-          transform: `translate(${anchor.x}px, ${anchor.y}px) scale(${1 / zoom})`,
+          transform: `translate(${anchor.x}px, ${anchor.y}px) scale(${isNode ? 1 : 1 / zoom})`,
           transformOrigin: "0 0",
           zIndex: 1000,
           pointerEvents: "all",
