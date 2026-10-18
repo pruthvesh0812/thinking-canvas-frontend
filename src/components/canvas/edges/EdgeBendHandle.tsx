@@ -1,12 +1,12 @@
 import { useRef } from "react"
 import { EdgeLabelRenderer, useReactFlow } from "@xyflow/react"
-import type { Point } from "./bend-path"
+import { BEND_OFFSET, type Point } from "./bend-path"
 
 // Rests a little clear of the line instead of sitting on top of it — the
 // mirror image of EdgeDeleteButton's ABOVE_LINE_OFFSET, offset along the
 // opposite side of `normal` so the two controls never overlap and the
 // corner (or the Q badge, on QuestionEdge) stays uncluttered.
-const BELOW_LINE_OFFSET = 18
+const BELOW_LINE_OFFSET = BEND_OFFSET
 
 // Shared by LogicalEdge/QuestionEdge — a small dot floating just under the
 // line that doubles as a drag handle: grabbing it and moving the pointer

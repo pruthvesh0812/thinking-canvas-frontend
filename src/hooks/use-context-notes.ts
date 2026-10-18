@@ -110,13 +110,16 @@ export function focusFromClick(target: FocusTarget) {
   if (s.composer && !sameTarget(s.composer.target, target)) closeComposer()
 }
 
-/** Click on an edge: focus it and open its note box at the middle of the
- * edge. Clicking the edge whose box is already open leaves it as is. */
+/** Click on an edge: focus it and show only its own controls (delete, bend,
+ * the note count chip). Any side panel or note box that is open steps away —
+ * the panel and its input are opened from the count chip, not the line. */
 export function focusFromEdgeClick(edgeId: string) {
   const target: FocusTarget = { kind: "edge", id: edgeId }
   const s = useContextStore.getState()
-  if (sameTarget(s.composer?.target, target)) return
-  openComposer(target, { autoFocus: true })
+  s.setFocus(target)
+  // A note box that just opened for this very edge (a new connection) stays.
+  if (s.composer && !sameTarget(s.composer.target, target)) closeComposer()
+  if (s.panel.open) s.setPanel({ open: false })
 }
 
 /** Typing inside a node focuses it, nothing more. */

@@ -59,7 +59,7 @@ export function QuestionEdge({
     if (!clicked) return
     function onPointerDown(e: PointerEvent) {
       const target = e.target as Element | null
-      if (target === hitPathRef.current || target?.closest("[data-edge-delete]")) return
+      if (target === hitPathRef.current || target?.closest("[data-edge-delete],[data-edge-chip]")) return
       setClicked(false)
     }
     window.addEventListener("pointerdown", onPointerDown)
@@ -126,7 +126,7 @@ export function QuestionEdge({
           Q
         </div>
       </EdgeLabelRenderer>
-      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} />
+      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} revealed={revealed} />
     </>
   )
 }

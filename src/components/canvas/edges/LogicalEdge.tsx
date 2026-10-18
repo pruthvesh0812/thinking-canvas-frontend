@@ -50,7 +50,7 @@ export function LogicalEdge({
     if (!clicked) return
     function onPointerDown(e: PointerEvent) {
       const target = e.target as Element | null
-      if (target === hitPathRef.current || target?.closest("[data-edge-delete]")) return
+      if (target === hitPathRef.current || target?.closest("[data-edge-delete],[data-edge-chip]")) return
       setClicked(false)
     }
     window.addEventListener("pointerdown", onPointerDown)
@@ -102,7 +102,7 @@ export function LogicalEdge({
           <EdgeDeleteButton x={midX} y={midY} normal={normal} onDelete={() => requestEdgeDelete(id)} />
         </>
       )}
-      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} />
+      <EdgeContextMarkers edgeId={id} x={midX} y={midY} readOnly={readOnly} revealed={revealed} centered />
     </>
   )
 }

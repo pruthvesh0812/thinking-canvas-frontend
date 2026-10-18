@@ -1,8 +1,8 @@
 import { EdgeLabelRenderer } from "@xyflow/react"
-import type { Point } from "./bend-path"
+import { DELETE_OFFSET, type Point } from "./bend-path"
 
 // Lifts the button clear of the stroke instead of sitting on top of it.
-const ABOVE_LINE_OFFSET = 30
+const ABOVE_LINE_OFFSET = DELETE_OFFSET
 
 // Shared by LogicalEdge/QuestionEdge — the midpoint delete affordance that
 // appears while the edge is hovered or clicked, floating a little above the

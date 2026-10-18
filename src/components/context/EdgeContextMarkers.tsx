@@ -16,18 +16,40 @@ export function useEdgeComposerOpen(edgeId: string): boolean {
   return useContextStore((s) => s.composer?.target.kind === "edge" && s.composer.target.id === edgeId)
 }
 
-// Note-count badge + "?" for an edge, set just to the right of its midpoint
-// so they never sit on the Q badge / relate diamond / bend dot at the middle.
-export function EdgeContextMarkers({ edgeId, x, y, readOnly }: { edgeId: string; x: number; y: number; readOnly?: boolean }) {
+// The note-count chip sits on the edge's middle, between the bend dot and the
+// delete button. It shows once the edge has notes (or a draft); while the
+// edge's controls are showing it is there even with none, as "+", so the
+// first note can be added. Question and relate edges already have their Q
+// badge / diamond at the middle, so their chip is set just to the right.
+export function EdgeContextMarkers({
+  edgeId,
+  x,
+  y,
+  readOnly,
+  revealed,
+  centered,
+}: {
+  edgeId: string
+  x: number
+  y: number
+  readOnly?: boolean
+  revealed?: boolean
+  centered?: boolean
+}) {
   if (readOnly) return null
   return (
     <EdgeLabelRenderer>
       <div
-        className="nodrag nopan absolute flex items-center gap-1"
-        style={{ transform: `translate(0, -50%) translate(${x + 14}px, ${y}px)`, pointerEvents: "all" }}
+        className="nodrag nopan absolute"
+        style={{
+          transform: `translate(${centered ? "-50%" : "0"}, -50%) translate(${centered ? x : x + 14}px, ${y}px)`,
+          pointerEvents: "all",
+        }}
       >
-        <ContextBadge target={{ kind: "edge", id: edgeId }} />
-        <EdgeQuestionMark edgeId={edgeId} />
+        <ContextBadge target={{ kind: "edge", id: edgeId }} showEmpty={revealed} />
+        <div className="absolute left-full top-1/2 ml-1.5 -translate-y-1/2">
+          <EdgeQuestionMark edgeId={edgeId} />
+        </div>
       </div>
     </EdgeLabelRenderer>
   )

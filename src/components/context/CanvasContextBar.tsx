@@ -159,7 +159,10 @@ export function CanvasContextBar() {
   }
 
   return (
-    <section aria-label="Canvas context notes" className="relative flex-none px-[18px] py-2" style={{ background: "var(--tc-surface)" }}>
+    <section aria-label="Canvas context notes" className="flex-none px-[18px] py-2" style={{ background: "var(--tc-surface)" }}>
+      {/* About a third of the canvas, centred — it is a note bar, not the
+          main thing on screen. Full width on a small screen. */}
+      <div className="relative mx-auto" style={{ width: small ? "100%" : "clamp(520px, 35%, 640px)", maxWidth: "100%" }}>
       {showInfo && (
         <div
           role="note"
@@ -217,7 +220,7 @@ export function CanvasContextBar() {
             {count}
           </span>
         </button>
-        <div className="relative min-w-0 flex-1" style={{ flexBasis: 200 }}>
+        <div className="relative min-w-0 flex-1" style={{ flexBasis: 120 }}>
           {chip && (
             <div className="mb-1 flex items-center gap-2 pt-1 text-[11.5px]">
               <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "var(--tc-hairline)", color: "#5F574C" }}>
@@ -245,7 +248,7 @@ export function CanvasContextBar() {
             onFocus={() => setExpanded(true)}
             onBlur={() => setExpanded(false)}
             aria-label={bar.allMode ? `Note for every node (${allCount})` : "Canvas context note"}
-            placeholder={bar.allMode ? "One note, linked to every node…" : "Add background for the whole canvas…"}
+            placeholder={bar.allMode ? "One note, linked to every node…" : "Add canvas background…"}
             className="block w-full resize-none border-none bg-transparent px-1.5 py-[7px] text-[14px] outline-none"
             style={{ lineHeight: `${LINE_PX}px`, color: "var(--tc-ink)", overflowY: "auto" }}
           />
@@ -313,6 +316,7 @@ export function CanvasContextBar() {
             Shift+Enter new line · Alt+C jumps here
           </div>
         )}
+      </div>
       </div>
     </section>
   )

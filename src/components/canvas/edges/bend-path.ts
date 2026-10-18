@@ -43,15 +43,20 @@ export function unitNormal(source: Point, target: Point): Point {
   return { x: dy / len, y: -dx / len }
 }
 
+// How far the delete button and the bend dot float from the edge's middle,
+// perpendicular to it — the note count chip sits on the line between them.
+export const DELETE_OFFSET = 36
+export const BEND_OFFSET = 24
+
 // Where the edge's note card hangs below the edge's middle, in flow px. The
-// delete button (30px out on the normal) and the bend dot (18px out on the
+// delete button (36px out on the normal) and the bend dot (24px out on the
 // opposite side) float on either side of the midpoint, so the card has to
 // start below whichever of them reaches lower on screen — otherwise it covers
 // the controls. 12px is the resting gap when nothing is in the way.
 export function edgeCardOffset(source: Point, target: Point): number {
   const n = unitNormal(source, target)
-  const bendDotBottom = -n.y * 18 + 5
-  const deleteBottom = n.y * 30 + 16
+  const bendDotBottom = -n.y * BEND_OFFSET + 5
+  const deleteBottom = n.y * DELETE_OFFSET + 16
   return Math.max(12, Math.max(bendDotBottom, deleteBottom) + 10)
 }
 

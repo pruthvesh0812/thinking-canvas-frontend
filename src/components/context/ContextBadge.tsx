@@ -9,7 +9,7 @@ import { NoteIcon } from "./ContextComposer"
 // (§5.5): the note icon and the number. A dot means an unsaved draft. Clicking
 // opens the context panel on that component's notes (clicking again closes
 // it). The badge is filled while the panel shows this component's notes.
-export function ContextBadge({ target, style }: { target: FocusTarget; style?: React.CSSProperties }) {
+export function ContextBadge({ target, style, showEmpty }: { target: FocusTarget; style?: React.CSSProperties; showEmpty?: boolean }) {
   const count = useContextStore((s) => noteCount(s, target.kind, target.id))
   const hasDraft = useContextStore((s) => !!s.drafts[draftKey(target)]?.trim())
   const open = useContextStore(
@@ -29,13 +29,18 @@ export function ContextBadge({ target, style }: { target: FocusTarget; style?: R
     prevCount.current = count
   }, [count])
 
-  if (count === 0 && !hasDraft) return null
+  if (count === 0 && !hasDraft && !showEmpty) return null
 
   return (
     <button
       type="button"
+      data-edge-chip
       className={`nodrag nopan relative flex items-center gap-[5px] rounded-full text-[12px] font-bold ${pop ? "tc-pop" : ""}`}
-      aria-label={`${count} ${count === 1 ? "note" : "notes"} on ${name}${hasDraft ? ", unsaved draft" : ""} — open notes`}
+      aria-label={
+        count === 0 && !hasDraft
+          ? `Add context to ${name}`
+          : `${count} ${count === 1 ? "note" : "notes"} on ${name}${hasDraft ? ", unsaved draft" : ""} — open notes`
+      }
       aria-pressed={open}
       title={hasDraft ? "Notes — you have an unsaved draft here" : "Open notes"}
       style={{
@@ -51,13 +56,22 @@ export function ContextBadge({ target, style }: { target: FocusTarget; style?: R
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
-        // A draft with no saved notes: reopen the note box to restore it.
-        if (count === 0) openComposer(target, { autoFocus: true })
-        else toggleNotesFor(target)
+        // The panel has its own note box (sharing the draft), so any box
+        // under the component steps away — never two inputs at once.
+        closeComposer()
+        toggleNotesFor(target)
       }}
     >
-      <NoteIcon size={11} />
-      {count}
+      {count === 0 && !hasDraft ? (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+          <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <>
+          <NoteIcon size={11} />
+          {count}
+        </>
+      )}
       {hasDraft && (
         <span aria-hidden className="rounded-full" style={{ width: 6, height: 6, background: "var(--tc-amber)" }} />
       )}
