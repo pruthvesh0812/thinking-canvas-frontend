@@ -5,6 +5,7 @@ import { useNodes, useViewport } from "@xyflow/react"
 import { useCanvasStore } from "@/stores/canvas-store"
 import { useContextStore } from "@/stores/context-store"
 import { computeRoomOffsets } from "@/lib/make-room"
+import { edgeCardOffset, handleAnchor } from "@/components/canvas/edges/bend-path"
 
 // A node's note box is attached to its bottom edge (no gap, no pointer); an
 // edge's card hangs off a pointer.
@@ -56,9 +57,12 @@ export function MakeRoom({ disabled }: { disabled: boolean }) {
       const a = edge && rectOf(edge.source)
       const b = edge && rectOf(edge.target)
       if (edge && a && b) {
+        const from = handleAnchor(a, edge.sourceHandle)
+        const to = handleAnchor(b, edge.targetHandle)
+        const gap = edgeCardOffset(from, to)
         anchor = edge.bend
-          ? { x: edge.bend.x, y: edge.bend.y + 12 }
-          : { x: (a.x + a.width / 2 + b.x + b.width / 2) / 2, y: (a.y + a.height / 2 + b.y + b.height / 2) / 2 + 12 }
+          ? { x: edge.bend.x, y: edge.bend.y + gap }
+          : { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 + gap }
         fixed.add(edge.source)
         fixed.add(edge.target)
       }

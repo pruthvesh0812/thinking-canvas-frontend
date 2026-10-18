@@ -10,6 +10,12 @@ export function useEdgeFocused(edgeId: string): boolean {
   return useContextStore((s) => s.focus?.kind === "edge" && s.focus.id === edgeId)
 }
 
+/** True while this edge's note box is open. The edge keeps its delete and
+ * bend controls showing meanwhile — clicking into the box must not hide them. */
+export function useEdgeComposerOpen(edgeId: string): boolean {
+  return useContextStore((s) => s.composer?.target.kind === "edge" && s.composer.target.id === edgeId)
+}
+
 // Note-count badge + "?" for an edge, set just to the right of its midpoint
 // so they never sit on the Q badge / relate diamond / bend dot at the middle.
 export function EdgeContextMarkers({ edgeId, x, y, readOnly }: { edgeId: string; x: number; y: number; readOnly?: boolean }) {

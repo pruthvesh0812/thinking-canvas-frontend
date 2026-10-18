@@ -20,6 +20,7 @@ import { useMediaQuery } from "@/hooks/use-media-query"
 import { CONTEXT_SETTINGS, SMALL_SCREEN_QUERY } from "@/lib/context-settings"
 import { NodeMatchList } from "./NodeMatchList"
 import { BadgeRow, NoteBox } from "./NoteBox"
+import { edgeCardOffset, handleAnchor } from "@/components/canvas/edges/bend-path"
 
 // The anchored composer (§5.1): one note box. Under a node it is a drawer
 // attached to the node's bottom edge, a few px narrower than the node; on an
@@ -62,14 +63,18 @@ function useAnchor(target: FocusTarget): { x: number; y: number; nodeWidth: numb
     return { x: x + width / 2, y: y + (node.measured.height ?? 0), nodeWidth: width }
   }
   if (!edge || !node || !other) return null
-  if (edge.bend) return { x: edge.bend.x, y: edge.bend.y + 12, nodeWidth: null }
-  const center = (n: typeof node) => ({
-    x: n.internals.positionAbsolute.x + (n.measured.width ?? 0) / 2,
-    y: n.internals.positionAbsolute.y + (n.measured.height ?? 0) / 2,
+  const rectOf = (n: typeof node) => ({
+    x: n.internals.positionAbsolute.x,
+    y: n.internals.positionAbsolute.y,
+    width: n.measured.width ?? 0,
+    height: n.measured.height ?? 0,
   })
-  const a = center(node)
-  const b = center(other)
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 12, nodeWidth: null }
+  const a = handleAnchor(rectOf(node), edge.sourceHandle)
+  const b = handleAnchor(rectOf(other), edge.targetHandle)
+  // Below the edge's delete and bend controls, never on top of them.
+  const gap = edgeCardOffset(a, b)
+  if (edge.bend) return { x: edge.bend.x, y: edge.bend.y + gap, nodeWidth: null }
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + gap, nodeWidth: null }
 }
 
 function AnchoredComposer({ target }: { target: FocusTarget }) {

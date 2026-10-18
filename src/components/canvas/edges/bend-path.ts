@@ -42,3 +42,28 @@ export function unitNormal(source: Point, target: Point): Point {
   const len = Math.hypot(dx, dy) || 1
   return { x: dy / len, y: -dx / len }
 }
+
+// Where the edge's note card hangs below the edge's middle, in flow px. The
+// delete button (30px out on the normal) and the bend dot (18px out on the
+// opposite side) float on either side of the midpoint, so the card has to
+// start below whichever of them reaches lower on screen — otherwise it covers
+// the controls. 12px is the resting gap when nothing is in the way.
+export function edgeCardOffset(source: Point, target: Point): number {
+  const n = unitNormal(source, target)
+  const bendDotBottom = -n.y * 18 + 5
+  const deleteBottom = n.y * 30 + 16
+  return Math.max(12, Math.max(bendDotBottom, deleteBottom) + 10)
+}
+
+/** Where an edge attaches on a node: the middle of the side its handle id
+ * names ("right-source", "top-target", …), else the node's centre. This is
+ * the point the edge is drawn from, so the controls' normal and the note
+ * card's offset match what is on screen. */
+export function handleAnchor(rect: { x: number; y: number; width: number; height: number }, handleId?: string | null): Point {
+  const side = handleId?.split("-")[0]
+  if (side === "top") return { x: rect.x + rect.width / 2, y: rect.y }
+  if (side === "bottom") return { x: rect.x + rect.width / 2, y: rect.y + rect.height }
+  if (side === "left") return { x: rect.x, y: rect.y + rect.height / 2 }
+  if (side === "right") return { x: rect.x + rect.width, y: rect.y + rect.height / 2 }
+  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+}

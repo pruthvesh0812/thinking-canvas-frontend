@@ -5,7 +5,7 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
-import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
+import { EdgeContextMarkers, useEdgeComposerOpen, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
 import { focusFromEdgeClick } from "@/hooks/use-context-notes"
 
 // Dashed line with a midpoint ◇ — "how are these two related?" It stays
@@ -61,7 +61,8 @@ export function RelateEdge({
     return () => window.removeEventListener("pointerdown", onPointerDown)
   }, [clicked])
 
-  const revealed = !readOnly && clicked
+  const composerHere = useEdgeComposerOpen(id)
+  const revealed = !readOnly && (clicked || composerHere)
   // Focused component (context capture) — shares the composer's highlight.
   const edgeFocused = useEdgeFocused(id)
   const focused = !readOnly && edgeFocused
