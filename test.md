@@ -39,7 +39,7 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 ---
 
 ## Slice S03 — save a note on a node, for real (real canvas, local DB with the 3 backend migrations)
-**Known gap until S07–S08:** moving a note and deleting a node/edge are still not persisted on a real canvas (the console shows "not persisted to Supabase yet"). Edit / delete / Undo are persisted from S04.
+**Known gap until S08:** deleting a node/edge is still not fully persisted on a real canvas. Edit / delete / Undo are persisted from S04, moving from S07.
 1. Focus a node that has text, type a note in the composer, save → the badge shows 1 and the panel lists the note.
 2. Reload → the note, the badge and the panel entry are still there.
 3. Open the same canvas in a second browser → same note and same badge count.
@@ -54,7 +54,7 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 ---
 
 ## Slice S04 — edit, delete and undo a note (real canvas, local DB)
-**Known gap until S07–S08:** move a note, and deleting a node/edge, are still not persisted.
+**Known gap until S08:** deleting a node/edge is still not fully persisted.
 1. Edit a note in the panel (Edit → change → Save) → the new text shows; reload → the new text is still there; the second browser shows it after a reload.
 2. Edit, then click **Undo** on the "Note edited" toast → the old text returns; reload → still the old text.
 3. Delete a note → the badge count drops and the panel loses it; reload → still gone. In Supabase, the `context_entries` row has `deleted_at` set and its `context_links` row is **unchanged** (`state` still `active`).
@@ -86,6 +86,18 @@ No new code either: `/all` is one `create_context_entry` call with one link per 
 4. Delete the `/all` note from the panel on one node → it is removed from all nodes (one entry).
 5. Go offline, save a `/all` note, go online, press save again → one entry, no duplicates.
 6. Deleting a single *node* that has an `/all` note is slice S08 — leave that for later.
+
+---
+
+## Slice S07 — move a note (real canvas, local DB)
+1. Panel on n1 → a note → **Move to** → pick n2 → the note leaves n1 and shows on n2 (badge counts update). Reload → still on n2 only. In Supabase the **same** `context_links` row now has `target_id` = n2's id and `origin_status='MOVED'` (no new row, no deleted row).
+2. Click **Undo** on the "Moved to n2" toast → back on n1; reload → still on n1; that link row is `origin_status='OWNED'` again.
+3. Move a note that is already on n2 (e.g. a `/all` note) from n1 to n2 → no duplicate and no error message; n1 loses it, n2 still has exactly one. In Supabase the moved link has `state='deleted'`. Undo → it returns to n1.
+4. Move one link of a `/all` note → only that node's link moves; the other nodes keep the note.
+5. Move a note from the canvas context or an edge to a node → it appears on the node; Undo puts it back.
+6. Go offline and move → "Couldn't move the note. Try again.", the note stays where it was.
+7. Second browser sees the move after a reload.
+8. Mock mode: move + Undo work as before.
 
 ---
 

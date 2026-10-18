@@ -10,7 +10,7 @@ import {
   type FocusTarget,
   type RemovalPrompt,
 } from "@/stores/context-store"
-import { contextRepository } from "@/lib/context-repository"
+import { contextRepository, type ContextLinkPatch } from "@/lib/context-repository"
 import { fetchContextRemote } from "@/lib/context-repository-supabase"
 import { CONTEXT_SETTINGS } from "@/lib/context-settings"
 import { supabase } from "@/lib/supabase"
@@ -516,43 +516,51 @@ export async function editNote(entryId: string, text: string): Promise<boolean> 
 }
 
 /** Panel "Move to" — moves the link from the component being viewed to
- * another node; recorded as a user decision; one undo restores it. A note
- * linked to several nodes (`/all`) only moves off the one being viewed
- * (pm_handoff.md PM-9). */
+ * another node by updating that ONE link in place (target + origin_status
+ * 'MOVED'); one undo puts the old values back. A note linked to several
+ * nodes (`/all`) only moves off the one being viewed (pm_handoff.md PM-9). If
+ * the note is already on the destination, the moved link is marked deleted
+ * instead — no duplicate, no error shown. */
 export async function moveNote(entryId: string, from: { kind: ContextTargetType; id: string | null }, toNodeId: string) {
   const s = useContextStore.getState()
-  const previous = s.links.filter((l) => l.entry_id === entryId)
-  const movedAt = nowIso()
-  const moved: ContextLink = {
-    id: crypto.randomUUID(),
-    entry_id: entryId,
-    canvas_id: canvasKey(),
-    target_type: "node",
-    target_id: toNodeId,
-    origin_status: "MOVED",
-    state: "active",
-    created_at: movedAt,
-    updated_at: movedAt,
-  }
-  const isFrom = (l: ContextLink) =>
-    l.state === "active" && l.target_type === from.kind && (from.kind === "canvas" || l.target_id === from.id)
-  const alreadyThere = previous.some((l) => l.state === "active" && l.target_type === "node" && l.target_id === toNodeId)
-  const next = [...previous.filter((l) => !isFrom(l)), ...(alreadyThere ? [] : [moved])]
+  const active = s.links.filter((l) => l.entry_id === entryId && l.state === "active")
+  const link = active.find((l) => l.target_type === from.kind && (from.kind === "canvas" || l.target_id === from.id))
+  if (!link || (link.target_type === "node" && link.target_id === toNodeId)) return
 
-  const apply = async (links: ContextLink[]) => {
+  const alreadyThere = active.some((l) => l.target_type === "node" && l.target_id === toNodeId)
+  const moveTo: ContextLinkPatch = alreadyThere
+    ? { state: "deleted" }
+    : { target_type: "node", target_id: toNodeId, origin_status: "MOVED" }
+  const back: ContextLinkPatch = {
+    target_type: link.target_type,
+    target_id: link.target_id,
+    origin_status: link.origin_status,
+    state: link.state,
+  }
+
+  const apply = async (patch: ContextLinkPatch) => {
     const st = useContextStore.getState()
-    st.setEntries(st.entries, [...st.links.filter((l) => l.entry_id !== entryId), ...links])
-    await contextRepository.setEntryLinks(canvasKey(), entryId, links)
+    const at = nowIso()
+    st.setEntries(st.entries, st.links.map((l) => (l.id === link.id ? { ...l, ...patch, updated_at: at } : l)))
+    await contextRepository.updateLink(canvasKey(), link.id, patch)
   }
   try {
-    await apply(next)
-  } catch {
-    await apply(previous).catch(() => {})
+    try {
+      await apply(moveTo)
+    } catch (error) {
+      // 23505: the database already has this entry active on the destination
+      // (the store didn't know) — same outcome as alreadyThere.
+      if ((error as { code?: string }).code !== "23505" || alreadyThere) throw error
+      await apply({ state: "deleted" })
+    }
+  } catch (error) {
+    logger.warn("[context] note move failed", { entryId, error })
+    await apply(back).catch(() => {})
     showNotice("Couldn't move the note. Try again.")
     return
   }
   toast(`Moved to ${seqLabel(toNodeId)}`, () => {
-    void apply(previous).catch(() => showNotice("Couldn't undo the move."))
+    void apply(back).catch(() => showNotice("Couldn't undo the move."))
   })
 }
 

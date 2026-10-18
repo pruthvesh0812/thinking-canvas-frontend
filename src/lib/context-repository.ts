@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import { createEntryRemote, updateEntryRemote } from "@/lib/context-repository-supabase"
+import { createEntryRemote, updateEntryRemote, updateLinkRemote } from "@/lib/context-repository-supabase"
 import type { ComponentRemoval, ContextEntry, ContextLink } from "@/types"
 
 // Persistence seam for context entries, links, sequence numbers and drafts.
@@ -27,6 +27,8 @@ export interface ContextSnapshot {
 }
 
 // v2: rev-3 shapes (target_type / origin_status). Old v1 data is not read.
+export type ContextLinkPatch = Partial<Pick<ContextLink, "target_type" | "target_id" | "origin_status" | "state">>
+
 const PREFIX = "tc.context.v2."
 const DRAFTS_PREFIX = "tc.context-drafts.v1."
 
@@ -81,10 +83,12 @@ const localContextRepository = {
     })
   },
 
-  /** Replaces every link of one entry — used by move and its undo. */
-  setEntryLinks(canvasId: string, entryId: string, links: ContextLink[]) {
+  /** Updates one link in place — used by move, its undo, and "moved onto a
+   * duplicate" (state 'deleted'). */
+  updateLink(canvasId: string, linkId: string, patch: ContextLinkPatch) {
     return mutate(canvasId, (s) => {
-      s.links = [...s.links.filter((l) => l.entry_id !== entryId), ...links]
+      const at = new Date().toISOString()
+      s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...patch, updated_at: at } : l))
     })
   },
 
@@ -153,7 +157,7 @@ export const contextRepository: ContextRepository = USE_MOCK_PERSISTENCE
           ...(patch.content !== undefined && { content: patch.content }),
           ...(patch.deleted_at !== undefined && { deleted_at: patch.deleted_at }),
         }),
-      setEntryLinks: notPersisted("moving a note (slice S07)"),
+      updateLink: (_canvasId, linkId, patch) => updateLinkRemote(linkId, patch),
       setLinksStateForTargets: notPersisted("retiring links of a deleted node/edge (slice S08)"),
       insertComponentRemoval: notPersisted("the removal reason (slice S08)"),
       saveSequence: notPersisted("node numbering (assigned by the database)"),

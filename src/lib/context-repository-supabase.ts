@@ -47,6 +47,20 @@ export async function updateEntryRemote(
   if (!data?.length) throw new Error("update changed no rows")
 }
 
+/** Move a note (or undo the move), or mark a link deleted: update ONE link in
+ * place — never delete and re-insert. A move sets target_type/target_id and
+ * origin_status='MOVED'; moving onto a target the entry already has trips the
+ * one-active-link-per-target index (23505) — the caller then marks the moved
+ * link deleted instead. Throws the PostgREST error as-is. */
+export async function updateLinkRemote(
+  linkId: string,
+  patch: Partial<Pick<ContextLink, "target_type" | "target_id" | "origin_status" | "state">>,
+): Promise<void> {
+  const { data, error } = await supabase.from("context_links").update(patch).eq("id", linkId).select("id")
+  if (error) throw error
+  if (!data?.length) throw new Error("update changed no rows")
+}
+
 // PostgREST returns at most 1000 rows per request — page until a short page.
 const PAGE = 1000
 

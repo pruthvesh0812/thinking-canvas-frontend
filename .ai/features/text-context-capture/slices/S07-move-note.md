@@ -24,3 +24,10 @@ Moving between target types (node ↔ edge ↔ canvas) beyond what the UI alread
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- `context-repository-supabase.ts`: `updateLinkRemote` — updates one `context_links` row (`.eq('id').select('id')`, zero rows = failure).
+- `context-repository.ts`: `setEntryLinks` (delete + re-insert) is gone; `updateLink(canvasId, linkId, patch)` exists in both implementations.
+- `use-context-notes.ts` (`moveNote`): finds the viewed link and updates it in place — `target_type`, `target_id`, `origin_status:'MOVED'`. If the note is already on the destination (known locally, or the database answers `23505`) the moved link is set `state:'deleted'` instead. Undo restores the link's previous `target_type`/`target_id`/`origin_status`/`state`. Moving onto the same node is a no-op.
+- Moves from a canvas or edge note to a node also change `target_type`; the database allows it (the id/type check stays satisfied).
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S07).
