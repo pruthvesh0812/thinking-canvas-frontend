@@ -234,14 +234,19 @@ function PanelNoteBox({ target }: { target: FocusTarget }) {
   )
 }
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const min = Math.round(diff / 60000)
-  if (min < 1) return "just now"
-  if (min < 60) return `${min} min ago`
-  const h = Math.round(min / 60)
-  if (h < 24) return `${h} h ago`
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+// The note's own timestamp, not "11 min ago": "Today, 3:42 PM" for today,
+// "Oct 17, 6:10 PM" otherwise (with the year when it isn't this year).
+function formatStamp(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  if (d.toDateString() === now.toDateString()) return `Today, ${time}`
+  const date = d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  })
+  return `${date}, ${time}`
 }
 
 function NoteItem({
@@ -330,7 +335,7 @@ function NoteItem({
           {note.source === "typed" ? "Typed" : note.source === "spoken" ? "Spoken" : "Attachment"}
         </span>
         <span>You</span>
-        <span title={new Date(note.created_at).toLocaleString()}>{relativeTime(note.created_at)}</span>
+        <span title={new Date(note.created_at).toLocaleString()}>{formatStamp(note.created_at)}</span>
         {note.updated_at !== note.created_at && <span>· edited</span>}
         {linkCount > 1 && <span>· on {linkCount} nodes</span>}
         {mode === "read" && (

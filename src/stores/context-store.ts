@@ -26,6 +26,9 @@ export interface BarState {
   allMode: boolean
   /** Where `/all` came from, so Back/Esc returns the text there. */
   allPrevious: FocusTarget | null
+  /** `@n2` / `#text` was used in the bar: the bar's next save goes to this
+   * node (its notes panel then opens) — no note box opens under the node. */
+  aimedNodeId: string | null
   /** Set when a focused component was deleted while its composer held a
    * draft — the draft moved here, labelled (§7 "Target" edge case). */
   deletedFromLabel: string | null
@@ -139,7 +142,7 @@ export const useContextStore = create<ContextStore>()((set) => ({
   composer: null,
   composerSize: null,
   roomOffsets: {},
-  bar: { allMode: false, allPrevious: null, deletedFromLabel: null },
+  bar: { allMode: false, allPrevious: null, aimedNodeId: null, deletedFromLabel: null },
   barFocusRequest: 0,
   panel: { open: false, tab: "notes", view: "focus" },
   toast: null,

@@ -9,11 +9,15 @@ import {
   barIntroDismissed,
   dismissBarIntro,
   enterAllMode,
+  exitAimMode,
   exitAllMode,
   toggleNotesFor,
   looksLikeQuestion,
   saveNote,
+  shortTargetLabel,
   showNotice,
+  showNotesFor,
+  targetLabel,
 } from "@/hooks/use-context-notes"
 import { useNoteInput } from "@/hooks/use-note-input"
 import { useMediaQuery } from "@/hooks/use-media-query"
@@ -50,6 +54,11 @@ export function CanvasContextBar() {
   const [expanded, setExpanded] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const allCount = liveNodeIds ? liveNodeIds.split(",").length : 0
+  // A bar note aimed at one node with @n2 / #text. Re-read when its text or
+  // number changes; a node deleted meanwhile just ends the aim.
+  const aimedNode = useCanvasStore((s) => s.nodes.find((n) => n.id === bar.aimedNodeId && !n.data.setAsideAt))
+  useContextStore((s) => s.seqByNode)
+  const aimedLabel = aimedNode ? targetLabel({ kind: "node", id: aimedNode.id }) : null
 
   useEffect(() => {
     if (focusRequest === 0) return
@@ -86,18 +95,29 @@ export function CanvasContextBar() {
     if (saving || !text.trim()) return
     setSaving(true)
     const ids = liveNodeIds ? liveNodeIds.split(",") : []
+    const aimed = aimedNode ? ({ kind: "node", id: aimedNode.id } as const) : null
     const result = bar.allMode
       ? await saveNote(text, ids.map((id) => ({ kind: "node" as const, id })), `every node (${ids.length})`)
-      : await saveNote(text, [{ kind: "canvas", id: null }], "canvas context")
+      : aimed
+        ? await saveNote(text, [aimed], shortTargetLabel(aimed))
+        : await saveNote(text, [{ kind: "canvas", id: null }], "canvas context")
     setSaving(false)
     if (!result.ok) {
       setFailed(true)
       return
     }
     setFailed(false)
-    if (!bar.allMode && looksLikeQuestion(text)) showNotice("Saved as a note. Nothing replies here.")
+    if (!bar.allMode && !aimed && looksLikeQuestion(text)) showNotice("Saved as a note. Nothing replies here.")
     setDraft("canvas", result.remainder)
-    setBar({ allMode: false, allPrevious: null, deletedFromLabel: result.remainder ? bar.deletedFromLabel : null })
+    setBar({
+      allMode: false,
+      allPrevious: null,
+      // An overflow stays aimed at the same node for the next note.
+      aimedNodeId: result.remainder ? bar.aimedNodeId : null,
+      deletedFromLabel: result.remainder ? bar.deletedFromLabel : null,
+    })
+    // The note went to a node: show that node's notes, where it now is.
+    if (aimed && !result.remainder) showNotesFor(aimed)
   }
 
   const input = useNoteInput({
@@ -118,8 +138,8 @@ export function CanvasContextBar() {
     },
     onAll: (rest) => enterAllMode(rest, null),
     onSave: () => void save(),
-    onEscape: () => (bar.allMode ? exitAllMode() : textareaRef.current?.blur()),
-    onBackspaceEmpty: bar.allMode ? exitAllMode : undefined,
+    onEscape: () => (bar.allMode ? exitAllMode() : aimedNode ? exitAimMode() : textareaRef.current?.blur()),
+    onBackspaceEmpty: bar.allMode ? exitAllMode : aimedNode ? exitAimMode : undefined,
   })
 
   // Small screen with a composer open: the bar gives way to a one-line strip.
@@ -141,6 +161,8 @@ export function CanvasContextBar() {
 
   const chip = bar.allMode
     ? `Every node (${allCount})`
+    : aimedLabel
+      ? aimedLabel
     : bar.deletedFromLabel
       ? `Draft from deleted ${bar.deletedFromLabel}`
       : null
@@ -220,10 +242,10 @@ export function CanvasContextBar() {
               <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "var(--tc-hairline)", color: "#5F574C" }}>
                 {chip}
               </span>
-              {bar.allMode && (
+              {(bar.allMode || aimedLabel) && (
                 <button
                   type="button"
-                  onClick={exitAllMode}
+                  onClick={bar.allMode ? exitAllMode : exitAimMode}
                   className="underline-offset-2 hover:underline"
                   style={{ border: "none", background: "none", color: "var(--tc-chrome)", cursor: "pointer" }}
                 >
@@ -241,8 +263,8 @@ export function CanvasContextBar() {
             onSelect={input.onSelect}
             onFocus={() => setExpanded(true)}
             onBlur={() => setExpanded(false)}
-            aria-label={bar.allMode ? `Note for every node (${allCount})` : "Canvas context note"}
-            placeholder={bar.allMode ? "One note, linked to every node…" : "Add canvas background…"}
+            aria-label={bar.allMode ? `Note for every node (${allCount})` : aimedLabel ? `Note for ${aimedLabel}` : "Canvas context note"}
+            placeholder={bar.allMode ? "One note, linked to every node…" : aimedLabel ? "Add context for this node…" : "Add canvas background…"}
             className="block w-full resize-none border-none bg-transparent px-1.5 py-[7px] text-[14px] outline-none"
             style={{ lineHeight: `${LINE_PX}px`, color: "var(--tc-ink)", overflowY: "auto" }}
           />
@@ -290,7 +312,7 @@ export function CanvasContextBar() {
         </button>
         {!small && editing && (
           <div className="w-full px-2 pb-0.5 text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
-            @n2 hands the note to node 2 · #text finds a node · /all writes one note for every node · Enter saves ·
+            @n2 aims the note at node 2 · #text finds a node · /all writes one note for every node · Enter saves ·
             Shift+Enter new line · Alt+C jumps here
           </div>
         )}

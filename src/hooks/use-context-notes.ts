@@ -210,29 +210,43 @@ export function searchNodes(query: string, limit = CONTEXT_SETTINGS.hashAutocomp
 }
 
 /** Aims the note at a node (from `@n` or a `#` pick), moving any typed text
- * along with it. From the bar, the note is handed to the composer under that
- * node (§5.4). The view brings the node on screen via the composer's own
- * keep-in-view effect. Returns false (and says so) for an unknown number. */
+ * along with it. From a composer, the note moves to the composer under that
+ * node. From the bar, it STAYS in the bar, aimed at that node (chip "n2 ·
+ * text"): no note box opens under the node, and once saved the node's notes
+ * panel shows (§5.4). */
 export function aimAtNode(
   nodeId: string,
   rest: string,
   from: { kind: "composer"; target: FocusTarget } | { kind: "bar" },
 ) {
   const s = useContextStore.getState()
+  if (from.kind === "bar") {
+    s.setDraft("canvas", rest)
+    s.setBar({ aimedNodeId: nodeId, allMode: false, allPrevious: null, deletedFromLabel: null })
+    s.requestBarFocus()
+    markShortcutUsed()
+    return
+  }
   const target: FocusTarget = { kind: "node", id: nodeId }
   const key = draftKey(target)
   const carried = [s.drafts[key] ?? "", rest].filter((t) => t.trim()).join(" ")
-  if (from.kind === "composer") {
-    s.setDraft(draftKey(from.target), "")
-  } else {
-    s.setDraft("canvas", "")
-  }
+  s.setDraft(draftKey(from.target), "")
   s.setDraft(key, carried)
-  openComposer(target, {
-    autoFocus: true,
-    previous: from.kind === "composer" ? from.target : null,
-  })
+  openComposer(target, { autoFocus: true, previous: from.target })
   markShortcutUsed()
+}
+
+/** Back/Esc on a bar note aimed at a node: the text stays in the bar, as a
+ * canvas note again. */
+export function exitAimMode() {
+  useContextStore.getState().setBar({ aimedNodeId: null })
+}
+
+/** Focuses a component and opens its notes panel (open-only, unlike the
+ * badge's toggle). */
+export function showNotesFor(target: FocusTarget) {
+  focusFromClick(target)
+  openPanel("notes", "focus")
 }
 
 export function aimAtSeq(
@@ -279,7 +293,7 @@ export function enterAllMode(rest: string, from: FocusTarget | null) {
   // From the bar, `rest` already is the bar's text; from a composer it is
   // that composer's text, joined onto anything the bar already held.
   s.setDraft("canvas", from ? [s.drafts.canvas ?? "", rest].filter((t) => t.trim()).join(" ") : rest)
-  s.setBar({ allMode: true, allPrevious: from })
+  s.setBar({ allMode: true, allPrevious: from, aimedNodeId: null })
   s.requestBarFocus()
   markShortcutUsed()
 }
