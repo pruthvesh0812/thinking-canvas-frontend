@@ -20,3 +20,9 @@ Canvas loads; no "Run the intervention" button; ghosts from a real `relate`/`que
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- Deleted: `src/hooks/use-intervention-demo.ts`, `src/lib/mock-intervention-scenario.ts`, `src/components/canvas/DebounceIndicator.tsx`. (`use-debounce-indicator.ts` does not exist in this repo — nothing to delete.)
+- `Canvas.tsx`: removed the demo hook, the "Run the intervention / Reset" strip, the `DebounceIndicator` overlay and their three imports.
+- `CLAUDE.md`'s repo-structure list still names `DebounceIndicator.tsx` / `use-debounce-indicator.ts` — left alone (not part of this change); worth a one-line cleanup there.
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S11).

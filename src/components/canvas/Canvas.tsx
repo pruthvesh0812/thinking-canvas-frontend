@@ -23,10 +23,8 @@ import { useCanvasStore, type CanvasNode } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
-import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
-import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
 import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 
@@ -43,7 +41,6 @@ import { NorthStarHeader } from "./NorthStarHeader"
 import { CanvasFooter } from "./CanvasFooter"
 import { PenRack } from "./PenRack"
 import { OpenThreadsRail } from "./OpenThreadsRail"
-import { DebounceIndicator } from "./DebounceIndicator"
 import { HistoryBar } from "./HistoryBar"
 import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
 import { SessionCompleteModal } from "../session/SessionCompleteModal"
@@ -220,13 +217,6 @@ function CanvasInner() {
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
-
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
-  // The seeded demo scenario anchors to a specific node id — only offer it
-  // on canvases that actually have that node (a freshly created canvas
-  // starts empty, per north-star capture's resetToEmpty()).
-  const hasInterventionScenario =
-    !isHistory && storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
 
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
@@ -522,34 +512,6 @@ function CanvasInner() {
       <HistoryBar />
       <NorthStarHeader />
 
-      {hasInterventionScenario && (
-        <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
-          <button
-            type="button"
-            onClick={trigger}
-            disabled={phase !== "idle"}
-            className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
-            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
-          >
-            ▶ Run the intervention
-          </button>
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-full px-[13px] py-1 text-xs"
-            style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
-          >
-            Reset
-          </button>
-          <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
-            {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
-            {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
-            {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
-            {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
-          </span>
-        </div>
-      )}
-
       <div
         className="relative flex-1 overflow-hidden"
         style={showCustomBackdrop ? backdropPaneStyle(canvasBackdrop, backdropColor) : undefined}
@@ -617,11 +579,6 @@ function CanvasInner() {
         {!isHistory && <BackdropSwitcher />}
         {/* The set-aside show/hide toggle lives in CanvasFooter (a canvas-level
             control), not floating over the pane. */}
-        {!isHistory && (
-          <div className="pointer-events-none absolute inset-0">
-            <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
-          </div>
-        )}
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
         {!isHistory && <ContextPanel />}

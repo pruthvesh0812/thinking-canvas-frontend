@@ -131,6 +131,14 @@ Change values with the service role / Supabase Studio (clients can only read). V
 
 ---
 
+## Slice S11 — intervention demo removed (any mode)
+1. Open the seeded Retention canvas (mock mode): there is **no** "▶ Run the intervention" / "Reset" strip under the north-star header, and no debounce indicator floating over the canvas.
+2. The canvas, nodes, edges, pen rack, threads rail, context panel and footer all look and work as before.
+3. On a real canvas, draw a `question` edge or a `relate` edge between two existing nodes → ghosts still stream in and can be accepted / rejected exactly as before.
+4. `npm run build` (or `npm run dev`) starts without errors.
+
+---
+
 ## A. Sequence numbers (§5.3)
 1. Every node shows `n1`, `n2`, … just outside its top-right corner, in creation order.
 2. Create a node: it gets the next number.

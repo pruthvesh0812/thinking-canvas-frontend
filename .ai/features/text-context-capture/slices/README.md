@@ -32,7 +32,7 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 | [S08](./S08-delete-component-with-notes.md) | Delete a node/edge that has notes + "Why remove this?" | Notes retire with their node; reason is stored | Yes | **built — awaiting your review** |
 | [S09](./S09-system-config.md) | Settings from `system_config` | Change a limit in the DB, UI follows | Yes | **built — awaiting your review** |
 | [S10](./S10-edge-labels.md) | Edge labels | — | Yes | **deferred** (decided: later) |
-| [S11](./S11-remove-intervention-demo.md) | Remove the intervention demo | The button and demo are gone; nothing else changes | No | not started |
+| [S11](./S11-remove-intervention-demo.md) | Remove the intervention demo | The button and demo are gone; nothing else changes | No | **built — awaiting your review** |
 
 ## Parked (not in any slice)
 
