@@ -13,7 +13,6 @@ import {
   looksLikeQuestion,
   saveNote,
   showNotice,
-  toggleNotesFor,
 } from "@/hooks/use-context-notes"
 import { useNoteInput } from "@/hooks/use-note-input"
 import { useMediaQuery } from "@/hooks/use-media-query"
@@ -26,7 +25,7 @@ const LINE_PX = 19
 // The canvas context bar (§5.4) — always docked at the bottom of the canvas,
 // for notes about the whole canvas. It must never read as an AI chat: a
 // permanent "notes" label, a calm neutral look (not the composer's focus
-// colour), a note icon, "Save note" (never Send/Ask), no avatar, no typing
+// colour), a note icon, "Save" (never Send/Ask), no avatar, no typing
 // indicator, no reply area. Writing here never changes the focus.
 export function CanvasContextBar() {
   const text = useContextStore((s) => s.drafts.canvas ?? "")
@@ -162,7 +161,7 @@ export function CanvasContextBar() {
     <section aria-label="Canvas context notes" className="flex-none px-[18px] py-2" style={{ background: "var(--tc-surface)" }}>
       {/* About a third of the canvas, centred — it is a note bar, not the
           main thing on screen. Full width on a small screen. */}
-      <div className="relative mx-auto" style={{ width: small ? "100%" : "clamp(520px, 35%, 640px)", maxWidth: "100%" }}>
+      <div className="relative mx-auto" style={{ width: small ? "100%" : "clamp(420px, 35%, 640px)", maxWidth: "100%" }}>
       {showInfo && (
         <div
           role="note"
@@ -203,23 +202,9 @@ export function CanvasContextBar() {
           transition: "border-color .16s ease",
         }}
       >
-        <button
-          type="button"
-          onClick={() => toggleNotesFor(null)}
-          aria-label={`${count} canvas ${count === 1 ? "note" : "notes"} — open in the context panel`}
-          title="Open canvas notes"
-          className="flex h-[34px] flex-none items-center gap-2 rounded-[9px] px-2.5 text-[13px] font-semibold"
-          style={{ border: "1px solid var(--tc-hairline)", background: "var(--tc-surface-quiet)", color: "#5F574C", cursor: "pointer" }}
-        >
+        <span className="mt-[9px] flex-none pl-1" style={{ color: "var(--tc-chrome-quiet)" }} aria-hidden>
           <NoteIcon size={14} />
-          {small ? null : "Canvas notes"}
-          <span
-            className="flex items-center justify-center rounded-full px-1.5 text-[11.5px] font-semibold"
-            style={{ minWidth: 20, height: 20, background: "var(--tc-hairline)", color: "#5F574C" }}
-          >
-            {count}
-          </span>
-        </button>
+        </span>
         <div className="relative min-w-0 flex-1" style={{ flexBasis: 120 }}>
           {chip && (
             <div className="mb-1 flex items-center gap-2 pt-1 text-[11.5px]">
@@ -308,7 +293,7 @@ export function CanvasContextBar() {
             transition: "background .16s ease",
           }}
         >
-          Save note
+          Save
         </button>
         {!small && editing && (
           <div className="w-full px-2 pb-0.5 text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
