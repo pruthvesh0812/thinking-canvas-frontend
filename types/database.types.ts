@@ -1,19 +1,7 @@
-// MIRRORED verbatim from thinking-canvas-api/src/db/database.types.ts
-// (Supabase-generated, from the actual DB schema — supabase gen types typescript)
-// source commit: 21d9ac454915d1d6e0eb8f210b1c998150b76d12   synced: 2026-08-05
-// nodes.{x,y,width,height} and edges.{from_handle,to_handle} (all nullable)
-// added 2026-08-11 per the layout-persistence contract update — re-copy from
-// the backend's regenerated file on the next full sync to pick up the
-// matching source commit.
-// nodes.set_aside_at (nullable timestamptz) hand-added 2026-09-08 for the
-// set-aside feature (backend migration 20260908000001_node_set_aside.sql,
-// commit fe02f3c) — the backend couldn't regenerate this file (local
-// Supabase/Docker down), so this one column was added by hand to match what
-// `supabase gen types` would emit; re-copy on the next full sync.
-// Do not edit by hand — re-run .ai/skills/sync-contract-types.md and re-copy.
-// Used only to type the Supabase client generic (src/lib/supabase.ts) so
-// .from(table).select()/.insert() are checked against real columns.
-
+// MIRRORED verbatim from thinking-canvas-be/src/db/database.types.ts
+// (Supabase-generated). source: branch feature/pivot-text-context-capture-2026-10-16T1703
+// (NOT merged to main yet), commit 24a57d4742e0ae276a3742165434d9b6256a71f4   synced: 2026-10-17
+// Do not edit by hand — re-copy on the next sync (.ai/skills/sync-contract-types.md).
 export type Json =
   | string
   | number
@@ -190,30 +178,232 @@ export type Database = {
       }
       canvases: {
         Row: {
-          canvas_version: number
           created_at: string
           id: string
+          next_node_seq: number
           original_intent: string
           title: string
           user_id: string | null
         }
         Insert: {
-          canvas_version?: number
           created_at?: string
           id?: string
+          next_node_seq?: number
           original_intent: string
           title: string
           user_id?: string | null
         }
         Update: {
-          canvas_version?: number
           created_at?: string
           id?: string
+          next_node_seq?: number
           original_intent?: string
           title?: string
           user_id?: string | null
         }
         Relationships: []
+      }
+      component_removals: {
+        Row: {
+          canvas_id: string
+          component_id: string
+          component_label: string
+          component_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          reason: string
+          session_id: string | null
+        }
+        Insert: {
+          canvas_id: string
+          component_id: string
+          component_label: string
+          component_type: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason: string
+          session_id?: string | null
+        }
+        Update: {
+          canvas_id?: string
+          component_id?: string
+          component_label?: string
+          component_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason?: string
+          session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "component_removals_canvas_id_fkey"
+            columns: ["canvas_id"]
+            isOneToOne: false
+            referencedRelation: "canvases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "component_removals_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      context_attachments: {
+        Row: {
+          alt_text: string | null
+          canvas_id: string
+          created_at: string
+          entry_id: string
+          file_name: string
+          height: number | null
+          id: string
+          mime_type: string
+          scan_status: string
+          size_bytes: number
+          storage_path: string
+          uploaded_by: string | null
+          width: number | null
+        }
+        Insert: {
+          alt_text?: string | null
+          canvas_id: string
+          created_at?: string
+          entry_id: string
+          file_name: string
+          height?: number | null
+          id?: string
+          mime_type: string
+          scan_status?: string
+          size_bytes: number
+          storage_path: string
+          uploaded_by?: string | null
+          width?: number | null
+        }
+        Update: {
+          alt_text?: string | null
+          canvas_id?: string
+          created_at?: string
+          entry_id?: string
+          file_name?: string
+          height?: number | null
+          id?: string
+          mime_type?: string
+          scan_status?: string
+          size_bytes?: number
+          storage_path?: string
+          uploaded_by?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "context_attachments_entry_canvas_fkey"
+            columns: ["entry_id", "canvas_id"]
+            isOneToOne: true
+            referencedRelation: "context_entries"
+            referencedColumns: ["id", "canvas_id"]
+          },
+        ]
+      }
+      context_entries: {
+        Row: {
+          author_id: string | null
+          canvas_id: string
+          content: string | null
+          created_at: string
+          deleted_at: string | null
+          id: string
+          session_id: string | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          author_id?: string | null
+          canvas_id: string
+          content?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          session_id?: string | null
+          source: string
+          updated_at?: string
+        }
+        Update: {
+          author_id?: string | null
+          canvas_id?: string
+          content?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          session_id?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "context_entries_canvas_id_fkey"
+            columns: ["canvas_id"]
+            isOneToOne: false
+            referencedRelation: "canvases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "context_entries_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      context_links: {
+        Row: {
+          canvas_id: string
+          created_at: string
+          entry_id: string
+          id: string
+          origin_status: string
+          state: string
+          target_id: string | null
+          target_type: string
+          updated_at: string
+        }
+        Insert: {
+          canvas_id: string
+          created_at?: string
+          entry_id: string
+          id?: string
+          origin_status: string
+          state?: string
+          target_id?: string | null
+          target_type: string
+          updated_at?: string
+        }
+        Update: {
+          canvas_id?: string
+          created_at?: string
+          entry_id?: string
+          id?: string
+          origin_status?: string
+          state?: string
+          target_id?: string | null
+          target_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "context_links_entry_canvas_fkey"
+            columns: ["entry_id", "canvas_id"]
+            isOneToOne: false
+            referencedRelation: "context_entries"
+            referencedColumns: ["id", "canvas_id"]
+          },
+        ]
       }
       edges: {
         Row: {
@@ -224,6 +414,7 @@ export type Database = {
           from_handle: string | null
           from_node_id: string
           id: string
+          label: string | null
           session_id: string
           to_handle: string | null
           to_node_id: string
@@ -236,6 +427,7 @@ export type Database = {
           from_handle?: string | null
           from_node_id: string
           id?: string
+          label?: string | null
           session_id: string
           to_handle?: string | null
           to_node_id: string
@@ -248,6 +440,7 @@ export type Database = {
           from_handle?: string | null
           from_node_id?: string
           id?: string
+          label?: string | null
           session_id?: string
           to_handle?: string | null
           to_node_id?: string
@@ -283,76 +476,6 @@ export type Database = {
           },
         ]
       }
-      intervention_offers: {
-        Row: {
-          agent_role: string
-          anchor_node_ids: string[]
-          canvas_id: string
-          context_fingerprint: string
-          created_at: string
-          directness: string | null
-          headline: string | null
-          id: string
-          resolved_at: string | null
-          seq: number
-          session_id: string
-          status: string
-          trigger_node_id: string
-        }
-        Insert: {
-          agent_role: string
-          anchor_node_ids?: string[]
-          canvas_id: string
-          context_fingerprint: string
-          created_at?: string
-          directness?: string | null
-          headline?: string | null
-          id?: string
-          resolved_at?: string | null
-          seq: number
-          session_id: string
-          status?: string
-          trigger_node_id: string
-        }
-        Update: {
-          agent_role?: string
-          anchor_node_ids?: string[]
-          canvas_id?: string
-          context_fingerprint?: string
-          created_at?: string
-          directness?: string | null
-          headline?: string | null
-          id?: string
-          resolved_at?: string | null
-          seq?: number
-          session_id?: string
-          status?: string
-          trigger_node_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "intervention_offers_canvas_id_fkey"
-            columns: ["canvas_id"]
-            isOneToOne: false
-            referencedRelation: "canvases"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "intervention_offers_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "sessions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "intervention_offers_trigger_node_id_fkey"
-            columns: ["trigger_node_id"]
-            isOneToOne: false
-            referencedRelation: "nodes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       nodes: {
         Row: {
           canvas_id: string
@@ -363,6 +486,7 @@ export type Database = {
           height: number | null
           id: string
           owner: string
+          seq: number
           session_id: string
           set_aside_at: string | null
           summary: string | null
@@ -379,6 +503,7 @@ export type Database = {
           height?: number | null
           id?: string
           owner?: string
+          seq?: number
           session_id: string
           set_aside_at?: string | null
           summary?: string | null
@@ -395,6 +520,7 @@ export type Database = {
           height?: number | null
           id?: string
           owner?: string
+          seq?: number
           session_id?: string
           set_aside_at?: string | null
           summary?: string | null
@@ -628,10 +754,7 @@ export type Database = {
           current_phase: string
           end_time: string | null
           id: string
-          latest_seq: number
           node_sequence: string[]
-          receptivity: number
-          receptivity_updated_at: string
           start_time: string
           status: string
         }
@@ -640,10 +763,7 @@ export type Database = {
           current_phase?: string
           end_time?: string | null
           id?: string
-          latest_seq?: number
           node_sequence?: string[]
-          receptivity?: number
-          receptivity_updated_at?: string
           start_time?: string
           status?: string
         }
@@ -652,10 +772,7 @@ export type Database = {
           current_phase?: string
           end_time?: string | null
           id?: string
-          latest_seq?: number
           node_sequence?: string[]
-          receptivity?: number
-          receptivity_updated_at?: string
           start_time?: string
           status?: string
         }
@@ -699,12 +816,62 @@ export type Database = {
         }
         Relationships: []
       }
+      system_config: {
+        Row: {
+          description: string | null
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          description?: string | null
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          description?: string | null
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      append_node_to_sequence: {
+        Args: { p_node_id: string; p_session_id: string }
+        Returns: undefined
+      }
+      append_thread_message: {
+        Args: { p_message: Json; p_thread_id: string }
+        Returns: undefined
+      }
+      create_context_entry: {
+        Args: { p_attachment?: Json; p_entry: Json; p_links: Json }
+        Returns: Database["public"]["Tables"]["context_entries"]["Row"]
+      }
+      decrement_insight_turns: {
+        Args: { p_insight_id: string }
+        Returns: undefined
+      }
+      match_nodes: {
+        Args: {
+          canvas_id_filter: string
+          match_count: number
+          match_threshold: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          summary: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

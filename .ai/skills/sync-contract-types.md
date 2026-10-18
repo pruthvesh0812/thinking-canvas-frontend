@@ -21,8 +21,8 @@ this skill is the discipline that keeps the mirror honest.
 
 ## Procedure
 
-1. **Fetch the backend's `types/index.ts`** (repo: `thinking-canvas-api`,
-   `main` branch).
+1. **Fetch the backend's `types/index.ts`** (repo: `thinking-canvas-be`,
+   `main` branch — or the feature branch named in the task, recording its SHA).
 2. **Copy it verbatim** into this repo's `types/index.ts`, replacing the file.
    - Exception: this repo does not ship `zod` runtime validation in MVP. Keep
      the Zod schemas ONLY if `zod` is already a dependency; otherwise strip the

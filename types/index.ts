@@ -1,26 +1,15 @@
-// MIRRORED from thinking-canvas-api/types/index.ts
-// source commit: 21d9ac454915d1d6e0eb8f210b1c998150b76d12   synced: 2026-08-05
-// PARTIAL SYNC 2026-09-06: EdgeType + SpawnDescriptor's `relate`-edge fields
-// only, hand-pulled from thinking-canvas-api's working tree on branch
-// feature/node-position-persistence-2026-08-11T1200 (uncommitted at sync
-// time — no commit sha to cite). The mirror is ALSO independently stale
-// beyond this (missing EdgeHandle, Node.x/y/width/height, Edge.from_handle/
-// to_handle, all merged to the backend's main since 21d9ac4) — untouched
-// here as out of scope for the relate change; needs its own full resync.
-// PARTIAL SYNC 2026-09-08: Node.set_aside_at + the node.set_aside /
-// node.restored canvas-event types only, from thinking-canvas-api commit
-// fe02f3ccfaea79f2ca69628b6a8dbc4f98edf91f (branch above, pending merge to
-// main) — the "set aside" (soft-archive) feature. The position-persistence
-// staleness noted above is STILL untouched (different story); a full resync
-// is still owed once that branch lands on main.
+// MIRRORED from thinking-canvas-be/types/index.ts
+// source: branch feature/pivot-text-context-capture-2026-10-16T1703 (NOT merged to main yet)
+// source commit: 24a57d4742e0ae276a3742165434d9b6256a71f4   synced: 2026-10-17
+// FULL RESYNC: everything above the "API payload types" banner is the backend
+// file verbatim (minus its zod import). Re-sync once that branch lands on main.
 // Do not edit by hand — re-run .ai/skills/sync-contract-types.md
 //
-// This repo does not ship zod at runtime (no `zod` dependency) — the
-// backend's five Zod schemas are hand-expanded below as plain TS types that
-// match the schemas' shape (including the canvasEventSchema `.refine()`,
-// expressed as a discriminated union instead of a runtime check) rather than
-// dropped. If zod is ever added here, replace these with `z.infer<...>` and
-// import the schemas verbatim instead.
+// This repo does not ship zod (no `zod` dependency): the backend's Zod schemas
+// are hand-expanded in the "API payload types" section at the bottom as plain
+// TS types that match the schemas' shape (including the canvasEventSchema
+// `.refine()`, expressed as a discriminated union). If zod is ever added here,
+// replace that section with `z.infer<...>` and import the schemas verbatim.
 
 // ─────────────────────────────────────────────
 // Enums
@@ -49,6 +38,11 @@ export type ContextNodeType =
 // Outer Subconscious.
 export type EdgeType = 'logical' | 'doubt' | 'question' | 'associative' | 'relate'
 
+// Which side of a node the edge attaches to. Frontend-owned (React Flow
+// handle id); backend never reads it. Enforced by CHECK constraint on the
+// edges table.
+export type EdgeHandle = 'TOP' | 'RIGHT' | 'LEFT' | 'BOTTOM'
+
 export type DirectionMarker = 'establishes' | 'questions' | 'contradicts' | 'explores'
 
 export type GhostStatus =
@@ -66,10 +60,10 @@ export type InsightSeverity = 'hard_block' | 'approach_pivot' | 'temporal_deferr
 // Why a single Observer edge (anchor→observation or observation→observation) was rejected.
 // Distinct from RejectionReason — that's about content quality, this is about connection quality.
 export type ConnectionRejectionReason =
-  | 'not_related' // the two nodes don't actually connect this way
-  | 'wrong_direction' // the connection is real but reversed
-  | 'too_indirect' // the jump is real but needs an intermediate bridge node
-  | 'already_obvious' // the user already sees this connection — not a genuine insight
+  | 'not_related'      // the two nodes don't actually connect this way
+  | 'wrong_direction'  // the connection is real but reversed
+  | 'too_indirect'     // the jump is real but needs an intermediate bridge node
+  | 'already_obvious'  // the user already sees this connection — not a genuine insight
 
 export type GhostEdgeStatus = 'pending' | 'accepted' | 'rejected'
 
@@ -89,8 +83,8 @@ export type Canvas = {
   id: string
   user_id: string
   title: string
-  original_intent: string // immutable after creation — RLS WITH CHECK rejects an UPDATE that changes it
-  canvas_version: number // context fingerprint — bumped by a DB trigger on nodes/edges; frontend never writes it
+  original_intent: string   // immutable after creation
+  next_node_seq: number     // monotonic counter behind nodes.seq — never decremented, so numbers are never reused
   created_at: string
 }
 
@@ -99,10 +93,7 @@ export type Session = {
   canvas_id: string
   status: 'active' | 'closed'
   current_phase: SessionPhase
-  node_sequence: string[] // ordered node IDs created in THIS session only — backend-written, read-only for the frontend
-  latest_seq: number // monotonic version guard — intervention-spectrum, not yet exercised by any live pipeline
-  receptivity: number // decayed offer-response aggregate, [0,1] — intervention-spectrum, not yet exercised
-  receptivity_updated_at: string
+  node_sequence: string[]   // ordered node IDs created in THIS session only
   start_time: string
   end_time: string | null
 }
@@ -112,19 +103,40 @@ export type Node = {
   canvas_id: string
   session_id: string
   owner: 'human' | 'ai'
+  // The stable number the user sees on the node (n1, n2, …). DB-assigned by a
+  // BEFORE INSERT trigger — the frontend never writes it. Unique per canvas, in
+  // creation order, never reused or renumbered (even after the node is deleted).
+  // Not the serializer's `seq:N`, which is a prompt-text label.
+  seq: number
   content: string | null
-  summary: string | null // backend-written (Gemini directional summary) — frontend renders NULL, never writes it
-  direction_marker: DirectionMarker | null // backend-written
-  embedding: number[] | null // backend-written — VECTOR(3072)
+  summary: string | null            // gemini-2.5-flash directional summary
+  direction_marker: DirectionMarker | null
+  embedding: number[] | null        // VECTOR(3072) — gemini-embedding-2
+  // Frontend-owned layout — restored on refetch so the canvas comes back
+  // exactly as the user left it. Backend never reads or writes these; agent
+  // serialization is content-oriented, not spatial. Nullable to keep
+  // pre-migration rows valid; new rows carry all four.
+  x: number | null
+  y: number | null
+  width: number | null
+  height: number | null
   created_at: string
   // Soft-archive — NULL = active (default), non-NULL = set aside at that
   // instant. A set-aside node is preserved, never destroyed, but every
-  // backend reasoning read filters it (and any edge touching it) out live.
-  // Only owner='ai' nodes are ever set aside; frontend-written directly
-  // (same class as content/position edits), then notified via a
-  // node.set_aside / node.restored canvas-event.
+  // reasoning read filters it (and any edge touching it) out live — see
+  // CORE-CONCEPTS.md → set aside. Only owner='ai' nodes are ever set aside;
+  // frontend-written directly (same class as content/position edits).
   set_aside_at: string | null
 }
+
+// The Observer's canvas map only ever reads these fields off a node (never
+// .content — see CORE-CONCEPTS.md) — narrows getAllByCanvas's select() to
+// match, instead of over-fetching every column for every node on the canvas.
+export type CanvasMapNode = Pick<Node, 'id' | 'session_id' | 'summary' | 'direction_marker'>
+
+// A node with its COMPLETE content, for readers that need the wording summaries
+// lose. Still excludes the embedding column, which no map ever renders.
+export type ContentMapNode = CanvasMapNode & Pick<Node, 'content'>
 
 export type Edge = {
   id: string
@@ -134,11 +146,143 @@ export type Edge = {
   to_node_id: string
   edge_type: EdgeType
   both_existing: boolean
+  // Frontend-owned handle attachments — restored on refetch so an edge
+  // reattaches to the exact same sides it left. Backend never reads or
+  // writes these; agent pipelines route off edge_type / both_existing only.
+  // Nullable to keep pre-migration edges valid.
+  from_handle: EdgeHandle | null
+  to_handle: EdgeHandle | null
+  // Short label the user typed on the edge itself (≤80 chars). That is the
+  // edge, not a note. Frontend-written; NULL = unlabelled.
+  label: string | null
   created_at: string
 }
 
 // ─────────────────────────────────────────────
-// Agent thread types (read-only ground truth — the frontend does not write these)
+// Context capture — notes the user attaches to a node, an edge, or the canvas
+// ─────────────────────────────────────────────
+// Frontend-written (supabase-js + RLS), backend-read: agents see entries live at
+// serialize time. One shape for typed, spoken and (later) attached context.
+// An entry is visible only through an ACTIVE link and while deleted_at is NULL.
+// Schema rev 3: thinking-canvas-frontend .ai/features/text-context-capture/schema.md
+
+export type ContextSource = 'typed' | 'spoken' | 'attachment'
+
+// 'canvas' = background ("Canvas context", target_id NULL). 'group' is reserved for v2.
+export type ContextTargetType = 'canvas' | 'node' | 'edge'
+
+// OWNED = written on that component directly; MOVED = the user moved it there.
+// (Says THAT it moved, not from where.)
+export type ContextOriginStatus = 'OWNED' | 'MOVED'
+
+// 'deleted' = the user removed the link, or its node/edge row was deleted (DB
+// trigger). Deleting a NOTE does not touch its links — it sets deleted_at.
+export type ContextLinkState = 'active' | 'deleted'
+
+export type ContextEntry = {
+  id: string                       // client-generated
+  canvas_id: string
+  session_id: string | null
+  // Plain text, never rewritten by the system. NULL only for an attachment with
+  // no caption. Limit: system_config 'context.note_max_chars' (DB ceiling 3000).
+  content: string | null
+  source: ContextSource
+  author_id: string | null         // v1 = the canvas owner
+  created_at: string
+  updated_at: string               // bumped by DB trigger on every UPDATE
+  deleted_at: string | null        // the USER deleted the note — undo clears it; agents never see a row with this set
+}
+
+export type ContextLink = {
+  id: string                       // client-generated
+  entry_id: string
+  canvas_id: string                // always equals the entry's canvas_id (composite FK)
+  target_type: ContextTargetType
+  target_id: string | null         // NULL ⇔ target_type === 'canvas'; no FK (polymorphic)
+  origin_status: ContextOriginStatus
+  state: ContextLinkState
+  created_at: string
+  updated_at: string               // bumps on a move and on any state change
+}
+
+// The file behind an 'attachment' entry — v1: one per entry. Table only: there is
+// no storage bucket or safety scan yet, so scan_status stays 'pending' and
+// nothing may read the file. Clients insert as 'pending' and cannot update.
+export type AttachmentScanStatus = 'pending' | 'clean' | 'rejected'
+
+export type ContextAttachment = {
+  id: string
+  entry_id: string
+  canvas_id: string
+  storage_path: string             // object path in a PRIVATE bucket — never a public URL
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  width: number | null             // images only
+  height: number | null
+  scan_status: AttachmentScanStatus
+  alt_text: string | null
+  uploaded_by: string | null
+  created_at: string
+}
+
+// "Why remove this?" answer, stored against the DELETED component's type + id —
+// never on a surviving component. No FK: the component no longer exists.
+export type ComponentRemoval = {
+  id: string
+  canvas_id: string
+  session_id: string | null
+  component_type: 'node' | 'edge'
+  component_id: string
+  component_label: string          // snapshot, e.g. "n4 · Pricing", so the record stays readable
+  reason: string
+  created_by: string | null
+  created_at: string
+}
+
+// Global tunables, read by the frontend on canvas load (select-only for clients).
+// Keys: context.composer_max_lines, context.canvas_bar_max_lines,
+// context.hash_autocomplete_rows, context.note_max_chars,
+// context.panel_note_collapsed_lines, context.removal_prompt_visible_ms,
+// edge.clarification_delay_ms, edge.needs_you_max_visible.
+export type SystemConfigRow = {
+  key: string
+  value: unknown                   // JSON — numbers for every key above
+  description: string | null
+  updated_at: string
+}
+
+// Arguments of the Postgres function create_context_entry (supabase.rpc) — the one
+// atomic write for a note: entry + its links (+ the file row). Idempotent on the
+// client-generated ids, so a retry completes a half-finished write. Needs ≥1 link.
+export type CreateContextEntryArgs = {
+  p_entry: {
+    id?: string
+    canvas_id: string
+    session_id?: string | null
+    source: ContextSource
+    content?: string | null
+  }
+  p_links: Array<{
+    id?: string
+    target_type: ContextTargetType
+    target_id?: string | null
+    origin_status?: ContextOriginStatus   // default 'OWNED'
+  }>
+  p_attachment?: {
+    id?: string
+    storage_path: string
+    file_name: string
+    mime_type: string
+    size_bytes: number
+    width?: number | null
+    height?: number | null
+    alt_text?: string | null
+  } | null
+}
+
+// ─────────────────────────────────────────────
+// Agent thread types
 // ─────────────────────────────────────────────
 
 export type GhostPair = {
@@ -164,9 +308,13 @@ export type ThreadMessage =
       timestamp: string
     }
   | {
+      // The Observer never writes a ghost pair — this turn just points at the
+      // structure it produced. Per-edge outcomes are read live from
+      // observer_structures/observer_edges at serialize time, never cached
+      // here, so a structure's status can't go stale in the thread log.
       role: 'assistant'
       turn_type: 'observer_structure'
-      content: string
+      content: string          // short summary, for prose context only
       structure_id: string
       timestamp: string
     }
@@ -181,15 +329,20 @@ export type AgentThread = {
 }
 
 // ─────────────────────────────────────────────
-// Observer structures — designed but not built yet (FRONTEND-CONTRACT.md §10.1):
-// observer_structures/observer_edges tables exist and these types are real, but
-// nothing writes them yet and POST /api/observer-edge-status is not a route.
-// Mirrored for when that lands — do not build UI against it today.
+// Observer structures
 // ─────────────────────────────────────────────
+// The Observer never writes a ghost pair directly into the thread. It highlights
+// one or more existing canvas nodes (anchors) and proposes a hierarchical DAG of
+// observation nodes reachable from them. The user hovers an anchor to reveal the
+// structure and accepts/rejects each EDGE independently — never the structure as
+// a unit. A node is the genuine synthesis of EVERY edge into it, so it only
+// crosses into the canvas once ALL of its incoming edges are accepted; any
+// rejected edge batches into a re-think of the whole observation instead of a
+// local delete (see CORE-CONCEPTS.md → The Observer Structure).
 
 export type ObservationNode = {
   ghost_id: string
-  level: number // 0 = bridges directly from the anchor nodes
+  level: number              // 0 = bridges directly from the anchor nodes
   node_type: ContextNodeType
   content: string
 }
@@ -197,8 +350,8 @@ export type ObservationNode = {
 export type ObserverEdge = {
   id: string
   structure_id: string
-  from_id: string // an anchor node id, or another observation node's ghost_id
-  to_id: string // an observation node's ghost_id
+  from_id: string             // an anchor node id, or another observation node's ghost_id
+  to_id: string                // an observation node's ghost_id
   status: GhostEdgeStatus
   created_at: string
 }
@@ -213,6 +366,9 @@ export type ObserverStructure = {
   created_at: string
 }
 
+// The Observer agent's direct output, before persistence — labels have already
+// been remapped to backend-assigned ghost IDs, but no structure_id/created_at
+// exist yet (assigned when the structure row is inserted).
 export type ObserverObservation = {
   anchor_node_ids: string[]
   nodes: ObservationNode[]
@@ -220,7 +376,7 @@ export type ObserverObservation = {
 }
 
 // ─────────────────────────────────────────────
-// Attunement (backend-internal — surfaced nowhere in the product per CORE-CONCEPTS.md)
+// Attunement
 // ─────────────────────────────────────────────
 
 export type AttunementState = {
@@ -231,19 +387,22 @@ export type AttunementState = {
   cognitive_mode: CognitiveMode
   question_style: QuestionStyle
   phase_shift_suggested: boolean
-  confidence: number | null
+  confidence: number | null   // 0.000 – 1.000
   created_at: string
 }
 
 // ─────────────────────────────────────────────
-// Rejection Insights (backend-internal)
+// Rejection Insights
 // ─────────────────────────────────────────────
 
 export type InsightPoint = {
-  label: string
-  sequence_number: number
+  label: string           // e.g. "Avoid high-level analogies"
+  sequence_number: number // which agent turn this came from
 }
 
+// Two categories of insight, distinguished by which fields are populated:
+// - Content category (Expander/Stress-Tester/Observer ghost rejections): rejection_reason set, target_edge_id null
+// - Connection category (Observer edge rejections): connection_feedback + target_edge_id set, rejection_reason null
 export type RejectionInsight = {
   id: string
   canvas_id: string
@@ -252,15 +411,15 @@ export type RejectionInsight = {
   rejection_reason: RejectionReason | null
   severity: InsightSeverity
   insight_points: InsightPoint[]
-  turns_remaining: number | null
+  turns_remaining: number | null  // null for non-temporal; counts down for temporal_deferral
   active: boolean
-  target_edge_id: string | null
+  target_edge_id: string | null              // set for connection-category rows — the rejected ObserverEdge
   connection_feedback: ConnectionRejectionReason | null
   created_at: string
 }
 
 // ─────────────────────────────────────────────
-// Streaming types (Plane 3 — GET /api/stream/:sessionId)
+// Streaming types
 // ─────────────────────────────────────────────
 
 export type SpawnDescriptor = {
@@ -284,8 +443,8 @@ export type SpawnDescriptor = {
   }
   context_edge: {
     edge_type: EdgeType
-    from: string // trigger_node_id
-    to: string // context ghost_id
+    from: string  // trigger_node_id
+    to: string    // context ghost_id
   }
 
   question_node?: {
@@ -294,50 +453,24 @@ export type SpawnDescriptor = {
   }
   question_edge?: {
     edge_type: EdgeType
-    from: string // context ghost_id
-    to: string // question ghost_id
+    from: string  // context ghost_id
+    to: string    // question ghost_id
   }
 }
 
-// Intervention Spectrum offer lifecycle — DESIGNED, NOT LIVE. `waiting` /
-// `offer` / `withdraw` are real RedisMessage variants in the backend's types
-// but src/routes/intervention.ts is never mounted in src/index.ts, so the
-// stream never actually emits them today. Handle them (ignore-and-log is
-// fine) for forward-compat; do not build UI that depends on receiving them.
-export type InterventionStatus = 'waiting' | 'shown' | 'pulled' | 'dismissed' | 'superseded' | 'expired'
-
-export type InterventionDirectness = 'direct' | 'subtle'
-
-export type InterventionOffer = {
-  id: string
-  canvas_id: string
-  session_id: string
-  agent_role: AgentRole
-  trigger_node_id: string
-  anchor_node_ids: string[]
-  seq: number
-  context_fingerprint: string
-  directness: InterventionDirectness | null
-  headline: string | null
-  status: InterventionStatus
-  created_at: string
-  resolved_at: string | null
-}
-
-// The live stream today only ever emits spawn/chunk/node_type/done/ping — see
-// the per-agent cheat sheet in GHOST-STREAMING.md. Route on `type` with an
-// explicit ignore-and-log default; never an exhaustive switch that throws.
 export type RedisMessage =
-  | { type: 'waiting'; offer: InterventionOffer; timer_ms: number } // not live — see note above
-  | { type: 'offer'; offer: InterventionOffer } // not live
-  | { type: 'withdraw'; offer_id: string } // not live
   | { type: 'spawn'; descriptor: SpawnDescriptor }
-  | { type: 'chunk'; target: string; data: string } // target = ghost_id; chunk is pre-routed server-side (context vs question) — never carries markers
-  | { type: 'node_type'; target: string; node_type: ContextNodeType } // server-side [NODE_TYPE:] split — restyle the context ghost named by target
+  | { type: 'chunk'; target: string; data: string }  // target = ghost_id
+  // Server-side marker split: the token layer strips the agent's [NODE_TYPE: x]
+  // marker and emits this instead of streaming it as ghost text. target = the
+  // context ghost id; the FE restyles that ghost to node_type.
+  | { type: 'node_type'; target: string; node_type: ContextNodeType }
+  // Attribution-carrying done. The ghost_pair turn is persisted BEFORE this is
+  // published, so thread_id/turn_index resolve the turn for POST /api/ghost-status
+  // without polling. Published LAST in a generation (it tears down the SSE
+  // connection — see src/routes/stream.ts is now hold-open, but ordering still
+  // matters for any FE that finalizes on done).
   | {
-      // Attribution-carrying done, published AFTER the ghost_pair thread turn is
-      // persisted — read thread_id/turn_index straight off this for
-      // POST /api/ghost-status, no agent_threads read needed.
       type: 'done'
       thread_id: string
       turn_index: number
@@ -345,7 +478,6 @@ export type RedisMessage =
       context_ghost_id: string
       question_ghost_id: string | null
     }
-  | { type: 'ping' } // keepalive every 25s — ignore
 
 // ─────────────────────────────────────────────
 // Audit types

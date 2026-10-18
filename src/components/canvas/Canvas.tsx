@@ -23,10 +23,8 @@ import { useCanvasStore, type CanvasNode } from "@/stores/canvas-store"
 import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
-import { useInterventionDemo } from "@/hooks/use-intervention-demo"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
-import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
 import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 
@@ -43,10 +41,18 @@ import { NorthStarHeader } from "./NorthStarHeader"
 import { CanvasFooter } from "./CanvasFooter"
 import { PenRack } from "./PenRack"
 import { OpenThreadsRail } from "./OpenThreadsRail"
-import { DebounceIndicator } from "./DebounceIndicator"
 import { HistoryBar } from "./HistoryBar"
 import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
 import { SessionCompleteModal } from "../session/SessionCompleteModal"
+import { useContextStore } from "@/stores/context-store"
+import { clearFocus, focusFromCreateEdge, openComposer, useContextLifecycle } from "@/hooks/use-context-notes"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { SMALL_SCREEN_QUERY } from "@/lib/context-settings"
+import { ContextComposer } from "../context/ContextComposer"
+import { MakeRoom } from "../context/MakeRoom"
+import { CanvasContextBar } from "../context/CanvasContextBar"
+import { ContextPanel } from "../context/ContextPanel"
+import { ContextToasts, RemovalReasonPrompt } from "../context/ContextOverlays"
 
 // Registered once, module scope — React Flow re-renders everything if these
 // are recreated per render (CANVAS-RENDERING.md).
@@ -106,6 +112,23 @@ function CanvasInner() {
   // sessionId is known) and held open for CanvasInner's lifetime; it is
   // never reconnected per ghost (GHOST-STREAMING.md).
   useGhostStream(sessionId)
+  // Text-only context capture: notes, drafts, sequence numbers, edge "?"s.
+  useContextLifecycle()
+  const roomOffsets = useContextStore((s) => s.roomOffsets)
+  const smallScreen = useMediaQuery(SMALL_SCREEN_QUERY)
+  // Nodes animate only while making room (and briefly after, so they glide
+  // back) — never during ordinary moves/resizes, which must track the
+  // pointer exactly.
+  const roomActive = Object.keys(roomOffsets).length > 0
+  const [roomTail, setRoomTail] = useState(false)
+  useEffect(() => {
+    if (!roomActive) return
+    return () => {
+      setRoomTail(true)
+      setTimeout(() => setRoomTail(false), 300)
+    }
+  }, [roomActive])
+  const animateRoom = roomActive || roomTail
   const viewedSession = useSessionStore((s) => s.viewedSession)
   const insightsMode = useSessionStore((s) => s.insightsMode)
   const isHistory = viewedSession !== null
@@ -115,6 +138,28 @@ function CanvasInner() {
   // pane only gets an explicit background/pattern outside of history at all.
   const showCustomBackdrop = !isHistory
   const { fitView } = useReactFlow()
+
+  // Tab on a focused component (nothing being typed) opens its composer —
+  // the keyboard form of "Add context" (§5.2 "On request").
+  useEffect(() => {
+    if (isHistory) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Tab" || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return
+      const { focus, composer } = useContextStore.getState()
+      if (!focus || composer) return
+      e.preventDefault()
+      openComposer(focus, { autoFocus: true })
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [isHistory])
+
+  // Leaving the live canvas for history closes the composer (drafts stay).
+  useEffect(() => {
+    if (isHistory) clearFocus()
+  }, [isHistory])
   // Nodes are a controlled prop (derived fresh from canvas-store every
   // render) — React Flow's own internal selection bookkeeping never sticks
   // unless we apply its "select" changes back in ourselves. Without this,
@@ -173,13 +218,6 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
-  // The seeded demo scenario anchors to a specific node id — only offer it
-  // on canvases that actually have that node (a freshly created canvas
-  // starts empty, per north-star capture's resetToEmpty()).
-  const hasInterventionScenario =
-    !isHistory && storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
-
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
   // yet, and showing it would misrepresent the trail (design brief).
@@ -209,10 +247,14 @@ function CanvasInner() {
 
   const nodes = useMemo<Node[]>(() => {
     const humanNodes: HumanFlowNode[] = visibleStoreNodes.map((n) => {
+      // Display-only "making room" offset while a composer is open — the
+      // stored position (and the saved layout) never changes (§5.1).
+      const roomOffset = isHistory ? 0 : roomOffsets[n.id] ?? 0
       return {
         id: n.id,
         type: "humanNode",
-        position: n.position,
+        position: roomOffset ? { x: n.position.x, y: n.position.y + roomOffset } : n.position,
+        className: animateRoom ? "tc-room" : undefined,
         data: {
           ...n.data,
           width: n.width,
@@ -282,7 +324,7 @@ function CanvasInner() {
     }
 
     return [...humanNodes, ...ghostNodes]
-  }, [visibleStoreNodes, pairs, isHistory, viewedSession, selectedNodeIds])
+  }, [visibleStoreNodes, pairs, isHistory, viewedSession, selectedNodeIds, roomOffsets, animateRoom])
 
   const edges = useMemo<Edge[]>(() => {
     const visibleIds = new Set(visibleStoreNodes.map((n) => n.id))
@@ -393,7 +435,12 @@ function CanvasInner() {
           // Every frame updates the store for a smooth drag; the commit
           // (React Flow sends a final change with dragging=false) is the
           // one we persist — one layout write per drag, not per frame.
-          if (change.position) updateNodePosition(change.id, change.position)
+          // Strip any making-room offset so a displaced node's drag stores
+          // its real position, not the temporary one.
+          if (change.position) {
+            const offset = useContextStore.getState().roomOffsets[change.id] ?? 0
+            updateNodePosition(change.id, offset ? { x: change.position.x, y: change.position.y - offset } : change.position)
+          }
           if (change.dragging === false) persistNodeLayout(change.id)
         } else if (change.type === "remove") {
           // React Flow's own deleteKeyCode is disabled below — the guarded
@@ -430,13 +477,16 @@ function CanvasInner() {
       // "drag to empty space creates a child node" gesture yet, so
       // both_existing is always true here (CANVAS-RENDERING.md); revisit
       // once that gesture exists.
-      persistEdge(
+      const edge = persistEdge(
         connection.source,
         connection.target,
         activePen,
         connection.sourceHandle,
         connection.targetHandle,
       )
+      // A new edge takes focus and its composer opens at its middle — the
+      // relation is the most often missing piece (§5.2 "New edge").
+      if (edge) focusFromCreateEdge(edge.id)
     },
     [persistEdge, activePen, isHistory],
   )
@@ -462,34 +512,6 @@ function CanvasInner() {
       <HistoryBar />
       <NorthStarHeader />
 
-      {hasInterventionScenario && (
-        <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
-          <button
-            type="button"
-            onClick={trigger}
-            disabled={phase !== "idle"}
-            className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
-            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
-          >
-            ▶ Run the intervention
-          </button>
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-full px-[13px] py-1 text-xs"
-            style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
-          >
-            Reset
-          </button>
-          <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
-            {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
-            {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
-            {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
-            {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
-          </span>
-        </div>
-      )}
-
       <div
         className="relative flex-1 overflow-hidden"
         style={showCustomBackdrop ? backdropPaneStyle(canvasBackdrop, backdropColor) : undefined}
@@ -502,6 +524,9 @@ function CanvasInner() {
           onNodesChange={onNodesChange}
           onConnect={onConnect}
           isValidConnection={isValidConnection}
+          // Click on empty canvas: nothing focused, composer closes, its
+          // draft kept (§5.2). Pan/drag never fire this.
+          onPaneClick={isHistory ? undefined : clearFocus}
           nodesConnectable={!isHistory}
           elementsSelectable={!isHistory}
           // Group select (drag multiple nodes together):
@@ -547,17 +572,17 @@ function CanvasInner() {
           {showCustomBackdrop && canvasBackdrop === "grid" && (
             <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={gridDotColor(backdropColor)} />
           )}
+          {!isHistory && <ContextComposer />}
+          {!isHistory && <RemovalReasonPrompt />}
+          <MakeRoom disabled={isHistory || smallScreen} />
         </ReactFlow>
         {!isHistory && <BackdropSwitcher />}
         {/* The set-aside show/hide toggle lives in CanvasFooter (a canvas-level
             control), not floating over the pane. */}
-        {!isHistory && (
-          <div className="pointer-events-none absolute inset-0">
-            <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
-          </div>
-        )}
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
+        {!isHistory && <ContextPanel />}
+        {!isHistory && <ContextToasts />}
         <SessionInsightsPanel />
 
         {/* Group delete confirm (2+ nodes selected, Backspace/Delete) — one
@@ -708,6 +733,7 @@ function CanvasInner() {
         )}
       </div>
 
+      {!isHistory && <CanvasContextBar />}
       {!isHistory && <CanvasFooter />}
       {!isHistory && <SessionCompleteModal />}
     </div>

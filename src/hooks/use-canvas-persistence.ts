@@ -7,6 +7,7 @@ import { canvasEvent, ghostStatus } from "@/lib/api"
 import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
 import type { EdgeType, RejectionReason } from "@/types"
+import { onComponentsDeleteCommitted, onComponentsRemoved, onComponentsRestored } from "@/hooks/use-context-notes"
 
 // How long a guarded delete stays undoable before it commits for real. Kept
 // as module state, not store state — it's a side-effect timer, not display
@@ -34,6 +35,18 @@ function nodeDeleteLabel(content: string): string {
   const firstLine = (content.split("\n")[0] ?? "").trim()
   if (!firstLine) return "Untitled node"
   return firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine
+}
+
+// Where a deleted edge was, for the "Why remove this?" prompt — the bend
+// point if it had one, else halfway between its endpoints' top-left corners
+// nudged toward their centres (good enough to read as "here").
+function edgeMidpoint(edge: CanvasEdge): { x: number; y: number } | null {
+  if (edge.bend) return edge.bend
+  const nodes = useCanvasStore.getState().nodes
+  const a = nodes.find((n) => n.id === edge.source)
+  const b = nodes.find((n) => n.id === edge.target)
+  if (!a || !b) return null
+  return { x: (a.position.x + a.width / 2 + b.position.x + b.width / 2) / 2, y: (a.position.y + b.position.y) / 2 + 40 }
 }
 
 function groupDeleteLabel(count: number): string {
@@ -310,17 +323,22 @@ async function materializeAcceptedGhost(
   edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
   ids: { canvasId: string; sessionId: string },
 ): Promise<boolean> {
-  const { error: nodeError } = await supabase.from("nodes").insert({
-    id: ghostId,
-    canvas_id: ids.canvasId,
-    session_id: ids.sessionId,
-    owner: "ai",
-    content,
-    x: position.x,
-    y: position.y,
-    width,
-    height: null,
-  })
+  // .select('id, seq') reads back the database-assigned node number — never
+  // sent, never generated here.
+  const { data: nodeData, error: nodeError } = await supabase
+    .from("nodes")
+    .insert({
+      id: ghostId,
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      owner: "ai",
+      content,
+      x: position.x,
+      y: position.y,
+      width,
+      height: null,
+    })
+    .select("id, seq")
   if (nodeError) {
     logger.warn("[ghost-interaction] accepted node insert failed", { ghostId, error: nodeError })
     return false
@@ -358,6 +376,7 @@ async function materializeAcceptedGhost(
         aiMarker: true,
         sessionNumber: useSessionStore.getState().sessionNumber ?? 1,
         synced: true,
+        seq: nodeData?.[0]?.seq,
       },
     },
     edgeRows.map((row, i) => ({
@@ -482,17 +501,22 @@ export function useCanvasPersistence() {
     // already carries its position — the frontend owns these columns; the
     // backend never reads them (layout contract update, 2026-08-11).
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
-    const { error } = await supabase.from("nodes").upsert({
-      id: nodeId,
-      canvas_id: canvasId,
-      session_id: sessionId,
-      owner: "human",
-      content,
-      x: node?.position.x ?? null,
-      y: node?.position.y ?? null,
-      width: node?.width ?? null,
-      height: node?.height ?? null,
-    })
+    // .select('id, seq') reads back the database-assigned node number (never
+    // sent). Re-saving an existing node returns its existing number.
+    const { data, error } = await supabase
+      .from("nodes")
+      .upsert({
+        id: nodeId,
+        canvas_id: canvasId,
+        session_id: sessionId,
+        owner: "human",
+        content,
+        x: node?.position.x ?? null,
+        y: node?.position.y ?? null,
+        width: node?.width ?? null,
+        height: node?.height ?? null,
+      })
+      .select("id, seq")
 
     if (error) {
       logger.warn("[persistence] insert failed, rolling back", { nodeId, error })
@@ -501,7 +525,9 @@ export function useCanvasPersistence() {
     }
 
     useCanvasStore.getState().markNodeSynced(nodeId)
-    logger.info("[persistence] node persisted to Supabase", { nodeId })
+    const seq = data?.[0]?.seq
+    if (seq != null) useCanvasStore.getState().setNodeSeq(nodeId, seq)
+    logger.info("[persistence] node persisted to Supabase", { nodeId, seq })
 
     // Only the first non-empty content commit is a creation — `node.synced`
     // above was read before this upsert, so it still reflects pre-write
@@ -605,8 +631,9 @@ export function useCanvasPersistence() {
     const edge = useCanvasStore
       .getState()
       .addEdge(source, target, edgeType, sourceHandle ?? undefined, targetHandle ?? undefined)
-    if (!edge) return // source/target already connected — nothing to persist
+    if (!edge) return undefined // source/target already connected — nothing to persist
     attemptEdgeWrite(edge)
+    return edge
   }
 
   // Shared by persistEdge (right after drawing) and retryPendingEdges (once
@@ -703,6 +730,10 @@ export function useCanvasPersistence() {
     // floating with a trigger that no longer exists. This is cleanup, not an
     // accept/reject decision, but resolve() is the store's only removal
     // action either way.
+    // Context capture (§5.7): a draft open on it moves to the canvas bar, and
+    // "Why remove this?" appears where it was. Before removeNode, so the
+    // cascaded edges can still be found.
+    onComponentsRemoved("node", [nodeId], nodeDeleteLabel(node.data.content), node.position)
     useCanvasStore.getState().removeNode(nodeId)
     useGhostStore.getState().resolve(nodeId)
 
@@ -720,6 +751,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted([nodeId], connectedEdges.map((e) => e.id))
       void commitNodeDelete(node, connectedEdges)
     }, DELETE_UNDO_WINDOW_MS)
     pendingNodeDeleteTimers.set(nodeId, timer)
@@ -732,6 +764,7 @@ export function useCanvasPersistence() {
       pendingNodeDeleteTimers.delete(nodeId)
     }
     useCanvasStore.getState().restoreNode(node, connectedEdges)
+    onComponentsRestored([nodeId])
     if (useCanvasUiStore.getState().pendingDelete?.id === nodeId) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }
@@ -795,6 +828,7 @@ export function useCanvasPersistence() {
     // call repeatedly: an edge between two targets is already gone by the
     // time the second endpoint's removeNode call runs, so that pass is a
     // no-op for it.
+    onComponentsRemoved("node", targets.map((n) => n.id), groupDeleteLabel(targets.length), targets[0].position)
     for (const node of targets) {
       useCanvasStore.getState().removeNode(node.id)
       useGhostStore.getState().resolve(node.id)
@@ -812,6 +846,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted(targets.map((n) => n.id), connectedEdges.map((e) => e.id))
       void commitNodesDelete(targets, connectedEdges)
     }, DELETE_UNDO_WINDOW_MS)
     pendingGroupDeleteTimers.set(batchKey, timer)
@@ -824,6 +859,7 @@ export function useCanvasPersistence() {
       pendingGroupDeleteTimers.delete(batchKey)
     }
     useCanvasStore.getState().restoreNodes(nodes, edges)
+    onComponentsRestored(nodes.map((n) => n.id))
     if (useCanvasUiStore.getState().pendingDelete?.id === batchKey) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }
@@ -868,6 +904,7 @@ export function useCanvasPersistence() {
           error: edgeError,
         })
         useCanvasStore.getState().restoreNodes(nodes, edges)
+        onComponentsRestored([...nodes.map((n) => n.id), ...edges.map((e) => e.id)])
         return
       }
     }
@@ -879,6 +916,7 @@ export function useCanvasPersistence() {
       // gone from Supabase by this point, so only the nodes come back.
       logger.warn("[persistence] nodes delete failed, restoring nodes", { count: nodes.length, error })
       useCanvasStore.getState().restoreNodes(nodes)
+      onComponentsRestored(nodeIds)
       return
     }
 
@@ -912,6 +950,7 @@ export function useCanvasPersistence() {
           error: edgeError,
         })
         useCanvasStore.getState().restoreNode(node, connectedEdges)
+        onComponentsRestored([node.id, ...connectedEdges.map((e) => e.id)])
         return
       }
     }
@@ -924,6 +963,7 @@ export function useCanvasPersistence() {
       // itself comes back.
       logger.warn("[persistence] node delete failed, restoring node", { nodeId: node.id, error })
       useCanvasStore.getState().restoreNode(node)
+      onComponentsRestored([node.id])
       return
     }
 
@@ -951,6 +991,7 @@ export function useCanvasPersistence() {
       return
     }
 
+    onComponentsRemoved("edge", [edgeId], edgeDeleteLabel(edge.edgeType).toLowerCase(), edgeMidpoint(edge))
     useCanvasStore.getState().removeEdge(edgeId)
 
     useCanvasUiStore.getState().setPendingDelete({
@@ -964,6 +1005,7 @@ export function useCanvasPersistence() {
       if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
         useCanvasUiStore.getState().setPendingDelete(null)
       }
+      onComponentsDeleteCommitted([edgeId])
       void commitEdgeDelete(edge)
     }, DELETE_UNDO_WINDOW_MS)
     pendingEdgeDeleteTimers.set(edgeId, timer)
@@ -976,6 +1018,7 @@ export function useCanvasPersistence() {
       pendingEdgeDeleteTimers.delete(edgeId)
     }
     useCanvasStore.getState().restoreEdge(edge)
+    onComponentsRestored([edgeId])
     if (useCanvasUiStore.getState().pendingDelete?.id === edgeId) {
       useCanvasUiStore.getState().setPendingDelete(null)
     }
@@ -999,6 +1042,7 @@ export function useCanvasPersistence() {
     if (error) {
       logger.warn("[persistence] edge delete failed, restoring edge", { edgeId: edge.id, error })
       useCanvasStore.getState().restoreEdge(edge)
+      onComponentsRestored([edge.id])
       return
     }
     logger.info("[persistence] edge deleted from Supabase", { edgeId: edge.id })
@@ -1027,6 +1071,8 @@ export function useCanvasPersistence() {
     useCanvasUiStore.getState().setRelateLegPrompt(null)
     if (toDelete.length === 0) return
     for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+    // Notes on these legs go with them (no undo window for this action).
+    onComponentsDeleteCommitted(toDelete.map((e) => e.id))
 
     const syncedIds = toDelete.filter((e) => e.synced).map((e) => e.id)
     if (syncedIds.length === 0) {
@@ -1048,6 +1094,7 @@ export function useCanvasPersistence() {
       // synced ones, so the note keeps both links and the store matches the DB.
       logger.warn("[persistence] relate-leg delete failed, restoring both legs", { syncedIds, error })
       for (const e of toDelete) useCanvasStore.getState().restoreEdge(e)
+      onComponentsRestored(toDelete.map((e) => e.id))
       return
     }
     logger.info("[persistence] relate legs deleted from Supabase", { syncedIds })

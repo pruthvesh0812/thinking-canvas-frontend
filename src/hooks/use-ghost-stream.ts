@@ -34,6 +34,9 @@ export function useGhostStream(sessionId: string | null) {
         logger.warn("[ghost-stream] unparseable message frame — dropping", { data: e.data })
         return
       }
+      // The backend still sends a { type: 'ping' } keepalive every 25s but no
+      // longer lists it in RedisMessage, so it's matched on the raw string.
+      if ((msg as { type: string }).type === "ping") return
       switch (msg.type) {
         case "spawn":
           useGhostStore.getState().spawn(msg.descriptor)
@@ -47,13 +50,9 @@ export function useGhostStream(sessionId: string | null) {
         case "done":
           useGhostStore.getState().markDone(msg)
           break
-        case "ping":
-          break
         default:
-          // Forward-compat: 'waiting'/'offer'/'withdraw' are typed but never
-          // emitted today (routes/intervention.ts isn't mounted) — and the
-          // protocol may grow further. Unknown types are logged and
-          // ignored, never thrown on (non-negotiable #10).
+          // Forward-compat: the protocol may grow. Unknown types are logged
+          // and ignored, never thrown on (non-negotiable #10).
           logger.warn("[ghost-stream] unhandled message type", { msg })
       }
     }

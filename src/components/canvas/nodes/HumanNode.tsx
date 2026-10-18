@@ -13,6 +13,9 @@ import {
 import { useGhostStore, isHaloAnchor } from "@/stores/ghost-store"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useCanvasStore, type CanvasNodeData } from "@/stores/canvas-store"
+import { useContextStore } from "@/stores/context-store"
+import { focusFromClick, focusFromTyping, openComposerAfterNodeText } from "@/hooks/use-context-notes"
+import { ContextBadge } from "@/components/context/ContextBadge"
 
 export type HumanNodeData = CanvasNodeData & {
   width: number
@@ -86,6 +89,11 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
   const readOnly = !!data.readOnly
   const showHalo = !readOnly && isAnchor
   const highlighted = useCanvasStore((s) => s.highlightedNodeId === id)
+  // Context capture: the focused component shares the composer's highlight
+  // colour; `/all` in the canvas bar outlines every node (§5.1, §5.3).
+  const focused = useContextStore((s) => s.focus?.kind === "node" && s.focus.id === id) && !readOnly
+  const allOutlined = useContextStore((s) => s.bar.allMode) && !readOnly && !data.setAside
+  const seq = useContextStore((s) => s.seqByNode[id])
 
   useLayoutEffect(() => {
     if (editing) textareaRef.current?.focus()
@@ -168,7 +176,12 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
 
     function onWindowUp() {
       cleanup()
-      if (!dragged) beginEdit()
+      // A click (not a drag) focuses the node — dragging never changes
+      // focus (context capture §5.2).
+      if (!dragged) {
+        focusFromClick({ kind: "node", id })
+        beginEdit()
+      }
     }
 
     window.addEventListener("pointermove", onWindowMove)
@@ -212,7 +225,11 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
         fontStyle: "normal",
         boxShadow: showHalo
           ? "0 0 0 1.5px rgba(201,144,58,.6), 0 0 14px 3px rgba(201,144,58,.4), 0 0 30px 8px rgba(201,144,58,.2)"
-          : selected
+          : focused
+            ? "0 0 0 2px var(--tc-focus), 0 2px 8px rgba(43,38,34,.1)"
+            : allOutlined
+              ? "0 0 0 1.5px var(--tc-focus)"
+              : selected
             ? "0 0 0 1.5px rgba(43,38,34,.45)"
             : highlighted
               ? "0 0 0 1.5px rgba(43,38,34,.45)"
@@ -345,8 +362,23 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
       <textarea
         ref={textareaRef}
         value={editing ? draft : data.content}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          focusFromTyping(id)
+        }}
         onBlur={commit}
+        // Enter or Tab confirms the node text and opens the context composer
+        // below it (§5.2 "After node text"); Shift+Enter is a new line.
+        onKeyDown={(e) => {
+          const confirm =
+            (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) ||
+            (e.key === "Tab" && !e.shiftKey)
+          if (!confirm) return
+          e.preventDefault()
+          const hasText = draft.trim() !== ""
+          textareaRef.current?.blur()
+          if (hasText) openComposerAfterNodeText(id)
+        }}
         readOnly={!editing}
         tabIndex={editing ? 0 : -1}
         placeholder=""
@@ -746,6 +778,22 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
               Set aside
             </span>
           )}
+        </div>
+      )}
+      {/* Sequence number (n3) — top right, stable, never reused (§5.3). */}
+      {seq !== undefined && (
+        <span
+          className="pointer-events-none absolute tabular-nums"
+          style={{ top: -17, right: 4, fontSize: 10.5, fontWeight: 600, color: focused ? "var(--tc-focus-ink)" : "var(--tc-chrome-quiet)" }}
+          aria-label={`Node n${seq}`}
+        >
+          n{seq}
+        </span>
+      )}
+      {/* Note count badge / "Add context" — never note text on the canvas. */}
+      {!readOnly && (
+        <div className="absolute" style={{ left: 10, bottom: -10, zIndex: 5 }}>
+          <ContextBadge target={{ kind: "node", id }} />
         </div>
       )}
       {data.seedSource && (

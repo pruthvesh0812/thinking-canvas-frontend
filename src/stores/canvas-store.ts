@@ -23,6 +23,11 @@ export interface CanvasNodeData extends Record<string, unknown> {
    * content commit succeeds — never write an empty node to Supabase just
    * because it exists on the canvas (use-canvas-persistence.ts). */
   synced?: boolean
+  /** The database-assigned sequence number ("n3"): unique per canvas, never
+   * reused. Only ever read back from Supabase (hydration, or the `.select`
+   * on the first write) — never generated or sent by the client. Absent
+   * until the node's first Supabase write, and always absent in mock mode. */
+  seq?: number
   /** Session-lifecycle pre-loaded starting points (use-session-lifecycle.ts):
    * a carried-forward unresolved thread, or an accepted Observer suggestion.
    * Purely a badge/visual marker — once edited, the node persists through
@@ -136,6 +141,8 @@ interface CanvasStore {
   /** Flips data.synced true after a node's first successful Supabase write
    * (use-canvas-persistence.ts) — never set any other way. */
   markNodeSynced: (id: string) => void
+  /** Stores the sequence number Supabase assigned to a node (see data.seq). */
+  setNodeSeq: (id: string, seq: number) => void
   /** Marks an accepted AI node as set aside (soft-archive), stamping
    * data.setAsideAt. Optimistic — use-canvas-persistence.ts writes
    * set_aside_at to Supabase and notifies; a failed write rolls this back
@@ -268,6 +275,10 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   markNodeSynced: (id) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, synced: true } } : n)),
+    })),
+  setNodeSeq: (id, seq) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, seq } } : n)),
     })),
   setNodeAside: (id, at) =>
     set((s) => ({
