@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { canvasEvent, ghostStatus } from "@/lib/api"
 import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
 import { logger } from "@/lib/logger"
+import { saveEdgeBend } from "@/lib/edge-bend-storage"
 import type { EdgeType, RejectionReason } from "@/types"
 import { onComponentsDeleteCommitted, onComponentsRemoved, onComponentsRestored } from "@/hooks/use-context-notes"
 
@@ -589,23 +590,22 @@ export function useCanvasPersistence() {
     logger.debug("[persistence] node layout persisted", { nodeId })
   }
 
-  // Drag-to-bend commit (EdgeBendHandle) — would persist bend_x/bend_y for
-  // an edge that already has a Supabase row, same shape and same
-  // "frontend owns this column, backend never reads it" convention as
-  // persistNodeLayout/writeNodeLayout above (nodes got x/y/width/height this
-  // way in the 2026-08-11 layout contract update). NOT wired to a real write
-  // yet: the edges table has no bend_x/bend_y columns — types/database.types.ts
-  // is generated from the live schema and doesn't have them, so an update
-  // here would just 400 on every drag. The bend still lives correctly in
-  // canvas-store; it just won't survive a reload until that migration lands
-  // and this TODO is turned into the same update(...).eq("id", ...) call
-  // writeNodeLayout uses.
+  // Drag-to-bend commit (EdgeBendHandle). The edges table has no
+  // bend_x/bend_y columns — types/database.types.ts is generated from the live
+  // schema and doesn't have them, so a Supabase update would 400 on every
+  // drag. Until that migration lands, the bend is kept per canvas in this
+  // browser (lib/edge-bend-storage.ts) and re-applied on hydrate, so it
+  // survives a reload here (not on another device).
   // TODO(contract-layer): add bend_x/bend_y (nullable float8) to edges, then
-  // supabase.from("edges").update({ bend_x, bend_y }).eq("id", edgeId).
+  // write them with supabase.from("edges").update({ bend_x, bend_y })
+  // .eq("id", edgeId) — same "frontend owns this column, backend never reads
+  // it" convention as writeNodeLayout above — and delete edge-bend-storage.
   function persistEdgeBend(edgeId: string) {
-    logger.debug("[persistence] edge bend changed (not yet persisted — bend_x/bend_y column pending)", {
-      edgeId,
-    })
+    const ids = currentIds()
+    if (!ids) return
+    const bend = useCanvasStore.getState().edges.find((e) => e.id === edgeId)?.bend ?? null
+    saveEdgeBend(ids.canvasId, edgeId, bend)
+    logger.debug("[persistence] edge bend stored locally (bend_x/bend_y column pending)", { edgeId })
   }
 
   // Any edge touching this node that stayed local-only because this node

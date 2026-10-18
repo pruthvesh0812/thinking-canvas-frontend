@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { sessionStart } from "@/lib/api"
 import { fetchSessionHistory } from "@/lib/session-history"
 import { logger } from "@/lib/logger"
+import { loadEdgeBends } from "@/lib/edge-bend-storage"
 import {
   useCanvasStore,
   type CanvasEdge,
@@ -166,6 +167,9 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
         },
       }))
 
+      // Reshape points live in this browser until the edges table has bend
+      // columns (lib/edge-bend-storage.ts).
+      const bends = loadEdgeBends(canvasId)
       const edges: CanvasEdge[] = (edgeRows ?? []).map((row) => ({
         id: row.id,
         source: row.from_node_id,
@@ -177,6 +181,7 @@ export function useCanvasHydration(canvasId: string): HydrationStatus {
         sourceHandle: row.from_handle ? `${row.from_handle.toLowerCase()}-source` : undefined,
         targetHandle: row.to_handle ? `${row.to_handle.toLowerCase()}-target` : undefined,
         edgeType: toHumanEdgeType(row.edge_type),
+        ...(bends[row.id] ? { bend: bends[row.id] } : {}),
         synced: true,
       }))
 
