@@ -26,8 +26,8 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 | [S02](./S02-node-numbers.md) | Node numbers (`n1…`) come from the database | Same numbers in two browsers; never reused | Yes | approved (go for S03) |
 | [S03](./S03-save-note-on-node.md) | Save a note on a node, for real | Note survives reload and shows elsewhere | Yes | approved (go for S04) |
 | [S04](./S04-edit-delete-undo-note.md) | Edit, delete and undo a note | Delete/undo round trip persists | Yes | **built — awaiting your review** |
-| [S05](./S05-canvas-and-edge-notes.md) | Notes on the canvas and on edges | Canvas bar + edge notes persist | Yes | not started |
-| [S06](./S06-all-and-shortcuts.md) | `/all`, `@nK`, `#` targets | One note on N nodes, one undo | Yes | not started |
+| [S05](./S05-canvas-and-edge-notes.md) | Notes on the canvas and on edges | Canvas bar + edge notes persist | Yes | **verification only — no code needed** |
+| [S06](./S06-all-and-shortcuts.md) | `/all`, `@nK`, `#` targets | One note on N nodes, one undo | Yes | **verification only — no code needed** |
 | [S07](./S07-move-note.md) | Move a note | Move + undo; no duplicate | Yes | not started |
 | [S08](./S08-delete-component-with-notes.md) | Delete a node/edge that has notes + "Why remove this?" | Notes retire with their node; reason is stored | Yes | not started |
 | [S09](./S09-system-config.md) | Settings from `system_config` | Change a limit in the DB, UI follows | Yes | not started |

@@ -26,3 +26,7 @@ Moving one link of a multi-node note (S07), shortcuts aimed at edges (out of sco
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- No code change was needed: `/all` and `@nK`/`#` already call `saveNote` with the right links (one RPC call, N links, same entry id on retry), Undo is `deleted_at` (S04), and `@nK` resolves against the database numbers (S02). Verification pass — see `test.md` → Slice S06.
+- Checks run: none needed beyond the S03/S04 ones (no code touched). Behaviour not tested (yours).

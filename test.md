@@ -67,6 +67,28 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 
 ---
 
+## Slice S05 — notes on the canvas and on edges (real canvas, local DB)
+No new code: both already save through S03's `create_context_entry` call (a canvas note sends a link with no `target_id`; an edge note sends the edge id). This slice is the test pass for them.
+1. Type in the canvas bar and save → listed under Canvas context in the panel; reload → still there; second browser too. In Supabase the link row has `target_type='canvas'` and `target_id` null.
+2. Focus an edge, add a note → a badge appears on the edge; reload → still there. The link row has `target_type='edge'` and the edge's id.
+3. Add a note on an edge you drew a moment ago (before you reload) → it saves without an error.
+4. Edit, delete and Undo work on both kinds (same as slice S04) and survive a reload.
+5. The canvas bar's question reminder still shows for text ending in "?" ("Saved as a note. Nothing replies here.").
+6. Answer the edge "?" (Needs you) with a note → saved; the "?" goes away.
+
+---
+
+## Slice S06 — `/all`, `@nK`, `#` targets (real canvas, local DB)
+No new code either: `/all` is one `create_context_entry` call with one link per node; Undo is the note's `deleted_at` (slice S04).
+1. In the canvas bar type `/all some text` and save → every node gets a badge; Supabase has **one** `context_entries` row and N `context_links` rows (one per node, set-aside AI nodes excluded).
+2. One Undo (toast) → the note disappears from every node; reload → still gone; the entry has `deleted_at` set and its links are still `active`.
+3. `@n2 some text` and `#` + picker aim the note at the right node; the saved link points at that node's id.
+4. Delete the `/all` note from the panel on one node → it is removed from all nodes (one entry).
+5. Go offline, save a `/all` note, go online, press save again → one entry, no duplicates.
+6. Deleting a single *node* that has an `/all` note is slice S08 — leave that for later.
+
+---
+
 ## A. Sequence numbers (§5.3)
 1. Every node shows `n1`, `n2`, … just outside its top-right corner, in creation order.
 2. Create a node: it gets the next number.

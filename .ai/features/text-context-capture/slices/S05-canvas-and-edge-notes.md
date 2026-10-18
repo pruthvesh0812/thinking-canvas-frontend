@@ -25,3 +25,7 @@
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- No code change was needed: `saveNote` already sends `{target_type:'canvas'}` (no `target_id`) and `{target_type:'edge', target_id}`; hydration and the store already group by `target_type`. This slice is the verification pass — see `test.md` → Slice S05.
+- Checks run: none needed beyond the S03/S04 ones (no code touched). Behaviour not tested (yours).
