@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import { createEntryRemote } from "@/lib/context-repository-supabase"
+import { createEntryRemote, updateEntryRemote } from "@/lib/context-repository-supabase"
 import type { ComponentRemoval, ContextEntry, ContextLink } from "@/types"
 
 // Persistence seam for context entries, links, sequence numbers and drafts.
@@ -148,7 +148,11 @@ export const contextRepository: ContextRepository = USE_MOCK_PERSISTENCE
   : {
       ...localContextRepository,
       insertEntry: (_canvasId, entry, links) => createEntryRemote(entry, links),
-      updateEntry: notPersisted("edit / delete / restore of a note (slice S04)"),
+      updateEntry: (_canvasId, entryId, patch) =>
+        updateEntryRemote(entryId, {
+          ...(patch.content !== undefined && { content: patch.content }),
+          ...(patch.deleted_at !== undefined && { deleted_at: patch.deleted_at }),
+        }),
       setEntryLinks: notPersisted("moving a note (slice S07)"),
       setLinksStateForTargets: notPersisted("retiring links of a deleted node/edge (slice S08)"),
       insertComponentRemoval: notPersisted("the removal reason (slice S08)"),

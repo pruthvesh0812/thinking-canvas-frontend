@@ -499,8 +499,14 @@ export async function editNote(entryId: string, text: string): Promise<boolean> 
   }
   try {
     await apply(content)
-  } catch {
+  } catch (error) {
     await apply(previous).catch(() => {})
+    // 23514 = the database refused the text itself (over the limit, blank).
+    const { code, message } = error as { code?: string; message?: string }
+    logger.warn("[context] note edit failed", { entryId, code, message })
+    showNotice(
+      code === "23514" && message ? `Couldn't save the edit: ${message}.` : "Couldn't save the edit. Try again.",
+    )
     return false
   }
   toast("Note edited", () => {

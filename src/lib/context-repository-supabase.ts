@@ -32,6 +32,21 @@ export async function createEntryRemote(entry: ContextEntry, links: ContextLink[
   if (error) throw error
 }
 
+/** Edit a note's text, or delete / restore it. Deleting is ONLY entries.deleted_at
+ * (and undo clears it) — a note's links are never touched by a user delete.
+ * `updated_at` is bumped by the database. Throws the PostgREST error as-is
+ * (23514 = text over the limit or blank). */
+export async function updateEntryRemote(
+  entryId: string,
+  patch: { content?: string | null; deleted_at?: string | null },
+): Promise<void> {
+  const { data, error } = await supabase.from("context_entries").update(patch).eq("id", entryId).select("id")
+  if (error) throw error
+  // An UPDATE that RLS hides doesn't error — it changes 0 rows. Treat that as
+  // a failed write so the caller rolls back instead of showing a lie.
+  if (!data?.length) throw new Error("update changed no rows")
+}
+
 // PostgREST returns at most 1000 rows per request — page until a short page.
 const PAGE = 1000
 

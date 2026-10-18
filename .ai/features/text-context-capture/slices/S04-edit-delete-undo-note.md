@@ -27,3 +27,11 @@ Move, other target types, node deletion.
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- `context-repository-supabase.ts`: `updateEntryRemote` — `update context_entries … .eq('id') .select('id')`; sends only `content` and/or `deleted_at`; a zero-row result (RLS hides rows silently) is thrown so the caller rolls back.
+- `context-repository.ts`: `updateEntry` is real on real canvases; it carries edit, delete and restore (and the undo of a save, which is a delete). `deleted_at` is the **only** column a delete touches — links are never changed by a user delete, and there is no `liveTargetIds`.
+- `use-context-notes.ts` (`editNote`): a failed edit rolls back and shows a notice — the database's message for `23514`, a generic one otherwise. Delete/restore already rolled back with their own notices.
+- Panel and badge counts already came from "active link AND entry not deleted", so no change there.
+- Not touched: move (S07) and node/edge deletion (S08).
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S04).

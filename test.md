@@ -39,7 +39,7 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 ---
 
 ## Slice S03 — save a note on a node, for real (real canvas, local DB with the 3 backend migrations)
-**Known gap until S04–S08:** on a real canvas only *saving* a note is persisted. Edit, delete, Undo (including the Undo on the "Saved" toast), move, and node/edge deletion still work on screen but are forgotten on reload (the console shows "not persisted to Supabase yet"). Don't test those against the DB yet.
+**Known gap until S07–S08:** moving a note and deleting a node/edge are still not persisted on a real canvas (the console shows "not persisted to Supabase yet"). Edit / delete / Undo are persisted from S04.
 1. Focus a node that has text, type a note in the composer, save → the badge shows 1 and the panel lists the note.
 2. Reload → the note, the badge and the panel entry are still there.
 3. Open the same canvas in a second browser → same note and same badge count.
@@ -50,6 +50,20 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 8. Mock mode: notes still work offline from `localStorage`, exactly as before.
 9. Side effect to glance at (formally tested in S05/S06): a canvas-bar note, an edge note and `/all` also save through the same database call and should survive a reload. Tell me if they don't.
 10. If saving always fails: look at the console. `42501` = the database refused it (canvas id not yours / not signed in); a PostgREST 400/404 about `create_context_entry` means the migrations aren't applied or the call shape is wrong — send me the message.
+
+---
+
+## Slice S04 — edit, delete and undo a note (real canvas, local DB)
+**Known gap until S07–S08:** move a note, and deleting a node/edge, are still not persisted.
+1. Edit a note in the panel (Edit → change → Save) → the new text shows; reload → the new text is still there; the second browser shows it after a reload.
+2. Edit, then click **Undo** on the "Note edited" toast → the old text returns; reload → still the old text.
+3. Delete a note → the badge count drops and the panel loses it; reload → still gone. In Supabase, the `context_entries` row has `deleted_at` set and its `context_links` row is **unchanged** (`state` still `active`).
+4. Delete a note, then **Undo** → the note and badge return; reload → still there; `deleted_at` is null again.
+5. Save a note and immediately click **Undo** on the "Saved" toast → the note disappears; reload → still gone.
+6. Edit a note to more than 1,000 characters (paste) → a "Couldn't save the edit…" message, and the text is unchanged after you cancel; the database row is unchanged.
+7. Go offline and delete a note → "Couldn't remove the note. Try again." and the note stays listed. Go online, delete again → it works.
+8. Mock mode: edit/delete/undo still work exactly as before, from `localStorage`.
+9. If anything silently "works" on screen but is back after a reload, tell me — that means a database update changed no rows (it should show an error instead).
 
 ---
 
