@@ -38,6 +38,21 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 
 ---
 
+## Slice S03 — save a note on a node, for real (real canvas, local DB with the 3 backend migrations)
+**Known gap until S04–S08:** on a real canvas only *saving* a note is persisted. Edit, delete, Undo (including the Undo on the "Saved" toast), move, and node/edge deletion still work on screen but are forgotten on reload (the console shows "not persisted to Supabase yet"). Don't test those against the DB yet.
+1. Focus a node that has text, type a note in the composer, save → the badge shows 1 and the panel lists the note.
+2. Reload → the note, the badge and the panel entry are still there.
+3. Open the same canvas in a second browser → same note and same badge count.
+4. In Supabase (Studio / SQL): `context_entries` has one row (your text, `source='typed'`, `deleted_at` null) and `context_links` has one row (`target_type='node'`, your node id, `origin_status='OWNED'`, `state='active'`).
+5. Go offline (devtools → Network → Offline), save a note → the draft stays in the box, a "Couldn't save the note…" message shows, and the note is not listed. Go back online and press save again → exactly **one** note exists (check `context_entries` for no duplicate).
+6. Paste more than 1,000 characters and save → the first 1,000 are saved, the rest stays in the box as the next draft (PM-6).
+7. A note that is only spaces can't be saved (nothing happens).
+8. Mock mode: notes still work offline from `localStorage`, exactly as before.
+9. Side effect to glance at (formally tested in S05/S06): a canvas-bar note, an edge note and `/all` also save through the same database call and should survive a reload. Tell me if they don't.
+10. If saving always fails: look at the console. `42501` = the database refused it (canvas id not yours / not signed in); a PostgREST 400/404 about `create_context_entry` means the migrations aren't applied or the call shape is wrong — send me the message.
+
+---
+
 ## A. Sequence numbers (§5.3)
 1. Every node shows `n1`, `n2`, … just outside its top-right corner, in creation order.
 2. Create a node: it gets the next number.

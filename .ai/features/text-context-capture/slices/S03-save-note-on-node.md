@@ -28,3 +28,11 @@ Edit, delete, undo, move, canvas/edge targets, `/all`.
 
 ## Rollback
 Revert; stand-in storage is untouched.
+
+## What actually changed (built)
+- New `src/lib/context-repository-supabase.ts`: `createEntryRemote` (the `create_context_entry` RPC; no `author_id`/timestamps/notify) and `fetchContextRemote` (two flat paged queries; keeps only links whose entry is live).
+- `context-repository.ts`: the `localStorage` object is now `localContextRepository`; `contextRepository` is that in mock mode, and on real canvases the same object with `insertEntry` pointed at Supabase. Not-yet-built writes (edit/delete/restore, move, link retirement on node delete, removal reasons) are explicit "not persisted yet" no-ops that name their slice.
+- `use-context-notes.ts`: on real canvases the lifecycle loads notes from Supabase (merging anything saved mid-load) instead of `localStorage`; the cross-tab `storage` sync is mock-only. `saveNote` re-uses the same entry/link ids when the same text and targets are retried; a failure keeps the draft and shows a notice — the database's own message for `23514`, a generic one otherwise; `42501` is logged as an error.
+- Hydration lives in the context lifecycle (the existing load seam) rather than `use-canvas-hydration.ts` — same effect, less coupling.
+- Client still trims the text before saving (existing PM-6 behaviour); the database stores exactly what is sent.
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour **not** tested, and not verified against a real Supabase (BK-6): this is the first real `create_context_entry` round trip.

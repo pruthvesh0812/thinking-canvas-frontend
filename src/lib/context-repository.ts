@@ -1,14 +1,16 @@
 import { logger } from "@/lib/logger"
+import { createEntryRemote } from "@/lib/context-repository-supabase"
 import type { ComponentRemoval, ContextEntry, ContextLink } from "@/types"
 
 // Persistence seam for context entries, links, sequence numbers and drafts.
 //
-// STAND-IN: the backend has no context tables yet (blocker.md BL-1/BL-2), so
-// this implementation keeps everything in localStorage, one key per canvas.
-// The method set deliberately mirrors the proposed Supabase write shape
-// (backend-requirements.md B1–B4) so swapping in the real implementation is
-// this one file — callers (use-context-notes.ts) never touch storage directly.
-// Every write is async and may reject; callers keep the draft and offer Retry.
+// Two implementations behind one shape. Mock mode (NEXT_PUBLIC_USE_MOCK_PERSISTENCE)
+// keeps everything in localStorage, one key per canvas. Real canvases write
+// notes to Supabase (context-repository-supabase.ts) — slice by slice: only
+// the methods overridden below are real so far; the rest log "not persisted"
+// and resolve, so the in-memory store still behaves but a reload forgets them.
+// Callers (use-context-notes.ts) never touch storage directly. Every write is
+// async and may reject; callers keep the draft and offer Retry.
 
 export interface ContextSnapshot {
   entries: ContextEntry[]
@@ -59,7 +61,7 @@ function mutate(canvasId: string, fn: (s: ContextSnapshot) => void): Promise<voi
   }
 }
 
-export const contextRepository = {
+const localContextRepository = {
   storageKey: (canvasId: string) => PREFIX + canvasId,
 
   load(canvasId: string): ContextSnapshot {
@@ -129,3 +131,26 @@ export const contextRepository = {
     }
   },
 }
+
+const USE_MOCK_PERSISTENCE = process.env.NEXT_PUBLIC_USE_MOCK_PERSISTENCE === "true"
+
+function notPersisted(what: string) {
+  return () => {
+    logger.warn(`[context-repo] ${what} is not persisted to Supabase yet`)
+    return Promise.resolve()
+  }
+}
+
+export type ContextRepository = typeof localContextRepository
+
+export const contextRepository: ContextRepository = USE_MOCK_PERSISTENCE
+  ? localContextRepository
+  : {
+      ...localContextRepository,
+      insertEntry: (_canvasId, entry, links) => createEntryRemote(entry, links),
+      updateEntry: notPersisted("edit / delete / restore of a note (slice S04)"),
+      setEntryLinks: notPersisted("moving a note (slice S07)"),
+      setLinksStateForTargets: notPersisted("retiring links of a deleted node/edge (slice S08)"),
+      insertComponentRemoval: notPersisted("the removal reason (slice S08)"),
+      saveSequence: notPersisted("node numbering (assigned by the database)"),
+    }

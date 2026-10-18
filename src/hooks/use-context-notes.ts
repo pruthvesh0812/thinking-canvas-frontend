@@ -11,6 +11,7 @@ import {
   type RemovalPrompt,
 } from "@/stores/context-store"
 import { contextRepository } from "@/lib/context-repository"
+import { fetchContextRemote } from "@/lib/context-repository-supabase"
 import { CONTEXT_SETTINGS } from "@/lib/context-settings"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
@@ -357,6 +358,12 @@ export interface SaveResult {
   remainder: string
 }
 
+// A failed save keeps its ids: pressing Retry with the same text and targets
+// re-sends the SAME entry/link ids, so if the first attempt actually reached
+// the database, create_context_entry completes it instead of duplicating.
+// Changing the text (or targets) starts a new note with new ids.
+let lastAttempt: { key: string; entryId: string; linkIds: string[] } | null = null
+
 /** Saves a typed note linked to one or more targets. Optimistic: the badge
  * goes up immediately; a failed write rolls back and the caller keeps the
  * draft and offers Retry (§8 "Failure"). */
@@ -373,8 +380,14 @@ export async function saveNote(
 
   const canvasId = canvasKey()
   const now = nowIso()
+  const attemptKey = JSON.stringify([canvasId, content, links.map((l) => [l.kind, l.id])])
+  const attempt =
+    lastAttempt?.key === attemptKey
+      ? lastAttempt
+      : { key: attemptKey, entryId: crypto.randomUUID(), linkIds: links.map(() => crypto.randomUUID()) }
+  lastAttempt = attempt
   const entry: ContextEntry = {
-    id: crypto.randomUUID(),
+    id: attempt.entryId,
     canvas_id: canvasId,
     session_id: useSessionStore.getState().sessionId,
     content,
@@ -384,8 +397,8 @@ export async function saveNote(
     updated_at: now,
     deleted_at: null,
   }
-  const linkRows: ContextLink[] = links.map((l) => ({
-    id: crypto.randomUUID(),
+  const linkRows: ContextLink[] = links.map((l, i) => ({
+    id: attempt.linkIds[i],
     entry_id: entry.id,
     canvas_id: canvasId,
     target_type: l.kind,
@@ -400,14 +413,26 @@ export async function saveNote(
   s.setEntries([...s.entries, entry], [...s.links, ...linkRows])
   try {
     await contextRepository.insertEntry(canvasId, entry, linkRows)
-  } catch {
+  } catch (error) {
     const after = useContextStore.getState()
     after.setEntries(
       after.entries.filter((e) => e.id !== entry.id),
       after.links.filter((l) => l.entry_id !== entry.id),
     )
+    // 23514 = the database refused the note itself (over the limit, blank, no
+    // link) — its message says why. 42501 = RLS refused it: the canvas or
+    // entry id isn't ours, which is a bug here, not something to retry.
+    const { code, message } = error as { code?: string; message?: string }
+    if (code === "42501") logger.error("[context] note save refused by RLS", { entryId: entry.id, canvasId, error })
+    else logger.warn("[context] note save failed", { entryId: entry.id, code, message })
+    showNotice(
+      code === "23514" && message
+        ? `Couldn't save the note: ${message}.`
+        : "Couldn't save the note. Your text is still here — try again.",
+    )
     return { ok: false, remainder }
   }
+  lastAttempt = null
   logger.info("[context] note saved", { entryId: entry.id, links: links.length })
 
   const lengthNote = remainder ? ` — first ${max.toLocaleString()} characters; the rest is still in the box` : ""
@@ -705,8 +730,10 @@ export function useContextLifecycle() {
     function load() {
       const snap = contextRepository.load(canvasId)
       useContextStore.getState().load(canvasId, {
-        entries: snap.entries,
-        links: snap.links,
+        // Real canvases: notes come from Supabase (fetched below), never from
+        // whatever an earlier build left in localStorage.
+        entries: USE_MOCK_PERSISTENCE ? snap.entries : [],
+        links: USE_MOCK_PERSISTENCE ? snap.links : [],
         // Real canvases get node numbers from the database (CanvasNodeData.seq,
         // merged in effect 2 below); the stored map is mock-mode only.
         seqByNode: USE_MOCK_PERSISTENCE ? snap.seqByNode : {},
@@ -716,17 +743,37 @@ export function useContextLifecycle() {
       })
     }
     load()
+    if (!USE_MOCK_PERSISTENCE && canvasId !== "mock") {
+      void fetchContextRemote(canvasId)
+        .then(({ entries, links }) => {
+          const s = useContextStore.getState()
+          if (s.loadedFor !== canvasId) return
+          // Keep anything saved while the fetch was in flight.
+          const haveE = new Set(entries.map((e) => e.id))
+          const haveL = new Set(links.map((l) => l.id))
+          s.setEntries(
+            [...entries, ...s.entries.filter((e) => !haveE.has(e.id))],
+            [...links, ...s.links.filter((l) => !haveL.has(l.id))],
+          )
+        })
+        .catch((error) => {
+          logger.error("[context] loading notes failed", { canvasId, error })
+          showNotice("Couldn't load this canvas's notes. Reload to try again.")
+        })
+    }
     if (!USE_MOCK_PERSISTENCE) {
       void supabase.auth.getSession().then(({ data }) => {
         currentUserId = data.session?.user.id ?? null
       })
     }
     function onStorage(e: StorageEvent) {
-      if (e.key !== contextRepository.storageKey(canvasId)) return
+      // Cross-tab sync through localStorage is the mock-mode stand-in only;
+      // on real canvases notes live in Supabase.
+      if (!USE_MOCK_PERSISTENCE || e.key !== contextRepository.storageKey(canvasId)) return
       const snap = contextRepository.load(canvasId)
       const s = useContextStore.getState()
       s.setEntries(snap.entries, snap.links)
-      if (USE_MOCK_PERSISTENCE) s.setSequence(snap.seqByNode, snap.nextSeq)
+      s.setSequence(snap.seqByNode, snap.nextSeq)
       s.setDismissedEdgePrompts(snap.dismissedEdgePrompts)
     }
     window.addEventListener("storage", onStorage)
