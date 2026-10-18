@@ -10,6 +10,7 @@ import {
   dismissBarIntro,
   enterAllMode,
   exitAllMode,
+  toggleNotesFor,
   looksLikeQuestion,
   saveNote,
   showNotice,
@@ -167,7 +168,7 @@ export function CanvasContextBar() {
           role="note"
           className="tc-unfold absolute z-20 w-[320px] rounded-[10px] px-3.5 py-3 text-[12.5px] leading-[1.5]"
           style={{
-            right: 112,
+            right: -38,
             bottom: "calc(100% - 6px)",
             background: "var(--tc-panel)",
             border: "1px solid var(--tc-panel-border)",
@@ -202,9 +203,17 @@ export function CanvasContextBar() {
           transition: "border-color .16s ease",
         }}
       >
-        <span className="mt-[9px] flex-none pl-1" style={{ color: "var(--tc-chrome-quiet)" }} aria-hidden>
-          <NoteIcon size={14} />
-        </span>
+        <button
+          type="button"
+          onClick={() => toggleNotesFor(null)}
+          aria-label={`${count} canvas ${count === 1 ? "note" : "notes"} — open in the context panel`}
+          title="Open canvas notes"
+          className="flex h-[34px] flex-none items-center gap-1.5 rounded-[9px] px-2 text-[12px] font-semibold"
+          style={{ border: "1px solid var(--tc-hairline)", background: "var(--tc-surface-quiet)", color: "#5F574C", cursor: "pointer" }}
+        >
+          <NoteIcon size={13} />
+          {count}
+        </button>
         <div className="relative min-w-0 flex-1" style={{ flexBasis: 120 }}>
           {chip && (
             <div className="mb-1 flex items-center gap-2 pt-1 text-[11.5px]">
@@ -263,22 +272,6 @@ export function CanvasContextBar() {
             </div>
           )}
         </div>
-        {!small && (
-          <button
-            type="button"
-            onClick={toggleInfo}
-            aria-label="What is this bar?"
-            aria-expanded={showInfo}
-            className="mt-[2px] flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full"
-            style={{ border: "1px solid var(--tc-hairline-strong)", background: showInfo ? "var(--tc-hairline)" : "transparent", color: "var(--tc-chrome)", cursor: "pointer" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.5" />
-              <path d="M8 7.2v3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <circle cx="8" cy="5" r=".6" fill="currentColor" />
-            </svg>
-          </button>
-        )}
         <button
           type="button"
           onClick={() => void save()}
@@ -302,6 +295,22 @@ export function CanvasContextBar() {
           </div>
         )}
       </div>
+        {!small && (
+          <button
+            type="button"
+            onClick={toggleInfo}
+            aria-label="What is this bar?"
+            aria-expanded={showInfo}
+            className="absolute flex h-[30px] w-[30px] items-center justify-center rounded-full"
+            style={{ left: "calc(100% + 8px)", top: 11, border: "1px solid var(--tc-hairline-strong)", background: showInfo ? "var(--tc-hairline)" : "transparent", color: "var(--tc-chrome)", cursor: "pointer" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8 7.2v3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="8" cy="5" r=".6" fill="currentColor" />
+            </svg>
+          </button>
+        )}
       </div>
     </section>
   )
