@@ -15,7 +15,7 @@ there). Where this folder and the older docs disagree, **this folder wins**.
 3. **Approval gate.** Before starting a slice I stop and wait for your "go". After
    finishing it I stop again, update that slice's *Test* section and `test.md`,
    and wait for your review before the next one.
-4. **I don't test on my own.** I run `tsc` and `lint` only. You test.
+4. **I don't test on my own.** I run `tsc` and `lint` only. You test. **After every slice I list in chat exactly what to test** (the same steps as the slice file and `test.md`).
 5. All blockers in [`BLOCKERS.md`](./BLOCKERS.md) are resolved. Apply the three backend migrations to your local database before testing S02.
 
 ## Order
