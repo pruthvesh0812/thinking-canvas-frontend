@@ -707,8 +707,10 @@ export function useContextLifecycle() {
       useContextStore.getState().load(canvasId, {
         entries: snap.entries,
         links: snap.links,
-        seqByNode: snap.seqByNode,
-        nextSeq: snap.nextSeq,
+        // Real canvases get node numbers from the database (CanvasNodeData.seq,
+        // merged in effect 2 below); the stored map is mock-mode only.
+        seqByNode: USE_MOCK_PERSISTENCE ? snap.seqByNode : {},
+        nextSeq: USE_MOCK_PERSISTENCE ? snap.nextSeq : 1,
         dismissedEdgePrompts: snap.dismissedEdgePrompts,
         drafts: contextRepository.loadDrafts(canvasId),
       })
@@ -724,20 +726,32 @@ export function useContextLifecycle() {
       const snap = contextRepository.load(canvasId)
       const s = useContextStore.getState()
       s.setEntries(snap.entries, snap.links)
-      s.setSequence(snap.seqByNode, snap.nextSeq)
+      if (USE_MOCK_PERSISTENCE) s.setSequence(snap.seqByNode, snap.nextSeq)
       s.setDismissedEdgePrompts(snap.dismissedEdgePrompts)
     }
     window.addEventListener("storage", onStorage)
     return () => window.removeEventListener("storage", onStorage)
   }, [canvasId])
 
-  // 2. Sequence numbers — creation order, never reused (backend-requirements
-  //    B3; assigned here until the backend owns it, blocker.md BL-3). Nodes
-  //    are appended to canvas-store in creation order and hydrated by
-  //    created_at, so array order is creation order.
+  // 2. Sequence numbers — unique per canvas, never reused.
+  //    Real canvases: the database assigns them (nodes.seq); they arrive on
+  //    CanvasNodeData.seq via hydration or the first write. This only merges
+  //    them into seqByNode, never removing one — a deleted node keeps its
+  //    number so "Draft from deleted n4" and an undone delete still read right.
+  //    Mock mode: assigned here in creation order and kept in localStorage
+  //    (nodes are appended in creation order and hydrated by created_at).
   useEffect(() => {
     if (loadedFor !== canvasId) return
     const s = useContextStore.getState()
+    if (!USE_MOCK_PERSISTENCE) {
+      let merged: Record<string, number> | null = null
+      for (const n of nodes) {
+        const seq = n.data.seq
+        if (seq != null && s.seqByNode[n.id] !== seq) (merged ??= { ...s.seqByNode })[n.id] = seq
+      }
+      if (merged) s.setSequence(merged, s.nextSeq)
+      return
+    }
     let next = s.nextSeq
     let changed = false
     const seqByNode = { ...s.seqByNode }

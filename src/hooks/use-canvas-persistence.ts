@@ -323,17 +323,22 @@ async function materializeAcceptedGhost(
   edgeSpecs: Array<{ from: string; to: string; edge_type: EdgeType; sourceHandle?: string }>,
   ids: { canvasId: string; sessionId: string },
 ): Promise<boolean> {
-  const { error: nodeError } = await supabase.from("nodes").insert({
-    id: ghostId,
-    canvas_id: ids.canvasId,
-    session_id: ids.sessionId,
-    owner: "ai",
-    content,
-    x: position.x,
-    y: position.y,
-    width,
-    height: null,
-  })
+  // .select('id, seq') reads back the database-assigned node number — never
+  // sent, never generated here.
+  const { data: nodeData, error: nodeError } = await supabase
+    .from("nodes")
+    .insert({
+      id: ghostId,
+      canvas_id: ids.canvasId,
+      session_id: ids.sessionId,
+      owner: "ai",
+      content,
+      x: position.x,
+      y: position.y,
+      width,
+      height: null,
+    })
+    .select("id, seq")
   if (nodeError) {
     logger.warn("[ghost-interaction] accepted node insert failed", { ghostId, error: nodeError })
     return false
@@ -371,6 +376,7 @@ async function materializeAcceptedGhost(
         aiMarker: true,
         sessionNumber: useSessionStore.getState().sessionNumber ?? 1,
         synced: true,
+        seq: nodeData?.[0]?.seq,
       },
     },
     edgeRows.map((row, i) => ({
@@ -495,17 +501,22 @@ export function useCanvasPersistence() {
     // already carries its position — the frontend owns these columns; the
     // backend never reads them (layout contract update, 2026-08-11).
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId)
-    const { error } = await supabase.from("nodes").upsert({
-      id: nodeId,
-      canvas_id: canvasId,
-      session_id: sessionId,
-      owner: "human",
-      content,
-      x: node?.position.x ?? null,
-      y: node?.position.y ?? null,
-      width: node?.width ?? null,
-      height: node?.height ?? null,
-    })
+    // .select('id, seq') reads back the database-assigned node number (never
+    // sent). Re-saving an existing node returns its existing number.
+    const { data, error } = await supabase
+      .from("nodes")
+      .upsert({
+        id: nodeId,
+        canvas_id: canvasId,
+        session_id: sessionId,
+        owner: "human",
+        content,
+        x: node?.position.x ?? null,
+        y: node?.position.y ?? null,
+        width: node?.width ?? null,
+        height: node?.height ?? null,
+      })
+      .select("id, seq")
 
     if (error) {
       logger.warn("[persistence] insert failed, rolling back", { nodeId, error })
@@ -514,7 +525,9 @@ export function useCanvasPersistence() {
     }
 
     useCanvasStore.getState().markNodeSynced(nodeId)
-    logger.info("[persistence] node persisted to Supabase", { nodeId })
+    const seq = data?.[0]?.seq
+    if (seq != null) useCanvasStore.getState().setNodeSeq(nodeId, seq)
+    logger.info("[persistence] node persisted to Supabase", { nodeId, seq })
 
     // Only the first non-empty content commit is a creation — `node.synced`
     // above was read before this upsert, so it still reflects pre-write

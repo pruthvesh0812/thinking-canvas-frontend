@@ -24,6 +24,20 @@ Nothing should look or behave differently. Run these once:
 
 ---
 
+## Slice S02 — node numbers from the database (real canvas, local DB with the 3 backend migrations applied)
+Mock mode is unchanged (numbers still assigned in the browser) — only check item 8 there.
+1. New canvas: type text in 3 nodes → `n1`, `n2`, `n3`. A node you haven't typed in yet shows **no** number until its text is first saved (the number comes from the database).
+2. Reload → the same numbers.
+3. Open the same canvas in a second browser → the same numbers.
+4. Delete `n3`, wait out the undo toast, add a node and type in it → it is `n4`, never `n3`.
+5. Delete a node and click Undo → it returns with its same number.
+6. Edit a node's text → its number does not change.
+7. Duplicate a node → the copy gets a new, higher number. Accept an AI ghost → the new AI node gets a number too.
+8. Mock mode (`NEXT_PUBLIC_USE_MOCK_PERSISTENCE=true`): numbers still `n1…n6` as before.
+9. If a number shows as nothing/`n?` where you expect one, open the browser console and look for a `[persistence] insert failed` warning — that means the database rejected the node write (e.g. migrations not applied).
+
+---
+
 ## A. Sequence numbers (§5.3)
 1. Every node shows `n1`, `n2`, … just outside its top-right corner, in creation order.
 2. Create a node: it gets the next number.

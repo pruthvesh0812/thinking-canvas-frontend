@@ -26,3 +26,11 @@ Anything about notes.
 
 ## Rollback
 Revert; numbers go back to browser-assigned.
+
+## What actually changed (built)
+- `canvas-store.ts`: `CanvasNodeData.seq?` + `setNodeSeq(id, seq)`.
+- `use-canvas-persistence.ts`: the human-node upsert and the accepted-ghost insert now `.select('id, seq')` and store the returned number. `seq` is never sent. Duplicates start without a number (the clone doesn't copy it) and get theirs on their first save.
+- `use-canvas-hydration.ts`: `seq` added to the nodes select and onto node data.
+- `use-context-notes.ts` (`useContextLifecycle`): on real canvases `seqByNode` is only *merged* from `node.data.seq` (never pruned, so a deleted node keeps its label); the localStorage map and the browser-side assigner now run in mock mode only; the cross-tab `storage` handler no longer overwrites numbers on real canvases.
+- Behaviour to know: on a real canvas a node shows no `nK` until its text is first saved, because the number only exists once the database row does.
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S02).
