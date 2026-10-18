@@ -70,6 +70,9 @@ interface ContextStore {
   nextSeq: number
   dismissedEdgePrompts: string[]
   drafts: Record<string, string>
+  /** Bumped when system_config has been applied to CONTEXT_SETTINGS, so
+   * components that read a setting while rendering re-render. */
+  settingsVersion: number
 
   focus: FocusTarget | null
   composer: ComposerState | null
@@ -98,6 +101,7 @@ interface ContextStore {
   ) => void
   setEntries: (entries: ContextEntry[], links: ContextLink[]) => void
   setSequence: (seqByNode: Record<string, number>, nextSeq: number) => void
+  bumpSettings: () => void
   setDismissedEdgePrompts: (ids: string[]) => void
   setDraft: (key: string, text: string) => void
   setFocus: (focus: FocusTarget | null) => void
@@ -122,6 +126,7 @@ export const useContextStore = create<ContextStore>()((set) => ({
   entries: [],
   links: [],
   seqByNode: {},
+  settingsVersion: 0,
   nextSeq: 1,
   dismissedEdgePrompts: [],
   drafts: {},
@@ -151,6 +156,7 @@ export const useContextStore = create<ContextStore>()((set) => ({
     }),
   setEntries: (entries, links) => set({ entries, links }),
   setSequence: (seqByNode, nextSeq) => set({ seqByNode, nextSeq }),
+  bumpSettings: () => set((s) => ({ settingsVersion: s.settingsVersion + 1 })),
   setDismissedEdgePrompts: (ids) => set({ dismissedEdgePrompts: ids }),
   setDraft: (key, text) =>
     set((s) => {

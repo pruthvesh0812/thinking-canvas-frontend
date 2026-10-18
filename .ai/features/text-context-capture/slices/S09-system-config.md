@@ -18,3 +18,12 @@ Change `context.note_max_chars` (service role) → reload → composer counter a
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- `context-repository-supabase.ts`: `fetchSystemConfigRemote()` (`select key, value`).
+- `context-settings.ts`: `applySystemConfig(rows)` maps the eight `context.*` / `edge.*` keys onto `CONTEXT_SETTINGS` (on top of the env/default values; unknown keys, non-numbers and values ≤ 0 are ignored, so a missing row means the default). The internal field names are unchanged — a key map connects them to the table names.
+- `use-context-notes.ts`: on real canvases the lifecycle reads the table once per canvas load, applies it, and bumps `settingsVersion` in the context store; a failed read logs a warning and keeps defaults.
+- `context-store.ts` + `ContextComposer` / `ContextPanel` / `CanvasContextBar`: subscribe to `settingsVersion` so values read while rendering update after the load.
+- The composer limit and the database limit now follow the same row (`context.note_max_chars`).
+- Not changed: a composer that is already open keeps its current textarea height until the next keystroke; timers already running keep their old delay.
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S09).

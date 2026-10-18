@@ -215,6 +215,8 @@ function ComposerBody({ target }: { target: FocusTarget }) {
   // Re-render the chip when the node's text or number changes.
   useCanvasStore((s) => (target.kind === "node" ? s.nodes.find((n) => n.id === target.id)?.data.content : s.edges.length))
   useContextStore((s) => s.seqByNode)
+  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
+  useContextStore((s) => s.settingsVersion)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)

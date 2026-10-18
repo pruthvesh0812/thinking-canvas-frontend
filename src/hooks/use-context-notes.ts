@@ -11,8 +11,8 @@ import {
   type RemovalPrompt,
 } from "@/stores/context-store"
 import { contextRepository, type ContextLinkPatch } from "@/lib/context-repository"
-import { fetchContextRemote } from "@/lib/context-repository-supabase"
-import { CONTEXT_SETTINGS } from "@/lib/context-settings"
+import { fetchContextRemote, fetchSystemConfigRemote } from "@/lib/context-repository-supabase"
+import { applySystemConfig, CONTEXT_SETTINGS } from "@/lib/context-settings"
 import { supabase } from "@/lib/supabase"
 import { logger } from "@/lib/logger"
 import type { ComponentRemoval, ContextEntry, ContextLink, ContextTargetType } from "@/types"
@@ -797,6 +797,14 @@ export function useContextLifecycle() {
         })
     }
     if (!USE_MOCK_PERSISTENCE) {
+      // Global tunables (limits, line counts, timings) — once per canvas load;
+      // defaults / env fallbacks apply if the table can't be read.
+      void fetchSystemConfigRemote()
+        .then((rows) => {
+          applySystemConfig(rows)
+          useContextStore.getState().bumpSettings()
+        })
+        .catch((error) => logger.warn("[context] system_config unavailable — using defaults", { error }))
       void supabase.auth.getSession().then(({ data }) => {
         currentUserId = data.session?.user.id ?? null
       })

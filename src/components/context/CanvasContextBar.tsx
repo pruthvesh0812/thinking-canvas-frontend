@@ -38,6 +38,8 @@ export function CanvasContextBar() {
   const composerOpen = useContextStore((s) => s.composer !== null)
   const liveNodeIds = useCanvasStore((s) => s.nodes.filter((n) => !n.data.setAsideAt).map((n) => n.id).join(","))
   const small = useMediaQuery(SMALL_SCREEN_QUERY)
+  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
+  useContextStore((s) => s.settingsVersion)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)

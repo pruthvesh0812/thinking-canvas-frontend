@@ -210,6 +210,8 @@ function NoteItem({
   const [moveQuery, setMoveQuery] = useState("")
   const [moveIndex, setMoveIndex] = useState(0)
   const textRef = useRef<HTMLDivElement>(null)
+  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
+  useContextStore((s) => s.settingsVersion)
   const lines = CONTEXT_SETTINGS.panelNoteCollapsedLines
 
   useLayoutEffect(() => {
@@ -368,6 +370,8 @@ function ActionLink({ onClick, children, danger }: { onClick: () => void; childr
 // skipping is always allowed and never asks again.
 function NeedsYouTab() {
   const queue = useContextStore((s) => s.edgePromptQueue)
+  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
+  useContextStore((s) => s.settingsVersion)
   const visible = queue.slice(0, CONTEXT_SETTINGS.needsYouMaxVisible)
   const waiting = queue.length - visible.length
   if (queue.length === 0) {
@@ -395,6 +399,8 @@ function EdgePromptItem({ edgeId }: { edgeId: string }) {
   const [text, setText] = useState("")
   const [failed, setFailed] = useState(false)
   useContextStore((s) => s.seqByNode)
+  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
+  useContextStore((s) => s.settingsVersion)
   const label = targetLabel({ kind: "edge", id: edgeId })
 
   async function answer(value: string) {

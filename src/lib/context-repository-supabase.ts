@@ -78,6 +78,13 @@ export async function insertComponentRemovalRemote(removal: ComponentRemoval): P
   if (error) throw error
 }
 
+/** The global tunables (read-only for clients). */
+export async function fetchSystemConfigRemote(): Promise<{ key: string; value: unknown }[]> {
+  const { data, error } = await supabase.from("system_config").select("key, value")
+  if (error) throw error
+  return data ?? []
+}
+
 // PostgREST returns at most 1000 rows per request — page until a short page.
 const PAGE = 1000
 

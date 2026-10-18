@@ -117,6 +117,20 @@ The notes' links are retired by the **database** (a trigger on the real DELETE, 
 
 ---
 
+## Slice S09 — settings from `system_config` (real canvas, local DB)
+Change values with the service role / Supabase Studio (clients can only read). Values must be JSON numbers. Reload the canvas after each change — settings are read once per canvas load.
+1. Default state (rows as seeded): composer and bar grow to 5 lines, `#` list shows 5 rows, notes collapse after 4 lines, "Why remove this?" stays ~10 s, "Needs you" shows 3 items.
+2. Set `context.note_max_chars` to `50` → reload → paste 80 characters in the composer: the counter shows `/ 50`, saving keeps the first 50 and leaves the rest as the next draft; the database also refuses a longer note (an edit past 50 shows "Couldn't save the edit: note is longer than 50 characters.").
+3. Set `context.composer_max_lines` to `2` → reload → the composer stops growing at 2 lines (then scrolls). Same for `context.canvas_bar_max_lines`.
+4. Set `context.hash_autocomplete_rows` to `2` → `#` shows 2 rows. Set `context.panel_note_collapsed_lines` to `2` → long notes collapse to 2 lines.
+5. Set `context.removal_prompt_visible_ms` to `3000` → "Why remove this?" disappears after ~3 s. Set `edge.needs_you_max_visible` to `1` → only 1 "Needs you" item shows (the rest "+N more").
+6. Set `edge.clarification_delay_ms` to `3000` → an unexplained new edge gets its "?" after ~3 s instead of ~10 s.
+7. Delete a row (or set a non-number / `0`) → reload → that setting is back to its default.
+8. If the table can't be read, the app keeps working with defaults (console: "system_config unavailable — using defaults").
+9. Mock mode: unchanged defaults (env overrides still work).
+
+---
+
 ## A. Sequence numbers (§5.3)
 1. Every node shows `n1`, `n2`, … just outside its top-right corner, in creation order.
 2. Create a node: it gets the next number.
