@@ -904,6 +904,7 @@ export function useCanvasPersistence() {
           error: edgeError,
         })
         useCanvasStore.getState().restoreNodes(nodes, edges)
+        onComponentsRestored([...nodes.map((n) => n.id), ...edges.map((e) => e.id)])
         return
       }
     }
@@ -915,6 +916,7 @@ export function useCanvasPersistence() {
       // gone from Supabase by this point, so only the nodes come back.
       logger.warn("[persistence] nodes delete failed, restoring nodes", { count: nodes.length, error })
       useCanvasStore.getState().restoreNodes(nodes)
+      onComponentsRestored(nodeIds)
       return
     }
 
@@ -948,6 +950,7 @@ export function useCanvasPersistence() {
           error: edgeError,
         })
         useCanvasStore.getState().restoreNode(node, connectedEdges)
+        onComponentsRestored([node.id, ...connectedEdges.map((e) => e.id)])
         return
       }
     }
@@ -960,6 +963,7 @@ export function useCanvasPersistence() {
       // itself comes back.
       logger.warn("[persistence] node delete failed, restoring node", { nodeId: node.id, error })
       useCanvasStore.getState().restoreNode(node)
+      onComponentsRestored([node.id])
       return
     }
 
@@ -1038,6 +1042,7 @@ export function useCanvasPersistence() {
     if (error) {
       logger.warn("[persistence] edge delete failed, restoring edge", { edgeId: edge.id, error })
       useCanvasStore.getState().restoreEdge(edge)
+      onComponentsRestored([edge.id])
       return
     }
     logger.info("[persistence] edge deleted from Supabase", { edgeId: edge.id })
@@ -1066,6 +1071,8 @@ export function useCanvasPersistence() {
     useCanvasUiStore.getState().setRelateLegPrompt(null)
     if (toDelete.length === 0) return
     for (const e of toDelete) useCanvasStore.getState().removeEdge(e.id)
+    // Notes on these legs go with them (no undo window for this action).
+    onComponentsDeleteCommitted(toDelete.map((e) => e.id))
 
     const syncedIds = toDelete.filter((e) => e.synced).map((e) => e.id)
     if (syncedIds.length === 0) {
@@ -1087,6 +1094,7 @@ export function useCanvasPersistence() {
       // synced ones, so the note keeps both links and the store matches the DB.
       logger.warn("[persistence] relate-leg delete failed, restoring both legs", { syncedIds, error })
       for (const e of toDelete) useCanvasStore.getState().restoreEdge(e)
+      onComponentsRestored(toDelete.map((e) => e.id))
       return
     }
     logger.info("[persistence] relate legs deleted from Supabase", { syncedIds })

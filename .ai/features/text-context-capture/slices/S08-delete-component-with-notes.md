@@ -26,3 +26,11 @@ Restoring a note whose node is gone (it simply stays hidden), `deleted_at` on no
 
 ## Rollback
 Revert the commit.
+
+## What actually changed (built)
+- `context-repository-supabase.ts`: `insertComponentRemovalRemote` (insert only; label capped at 500, reason at 1000; `created_by`/`created_at` defaulted by the DB).
+- `context-repository.ts`: `insertComponentRemoval` is real; `setLinksStateForTargets` is an intentional no-op on real canvases (the DB trigger retires links on the real DELETE).
+- `use-context-notes.ts`: `onComponentsDeleteCommitted` now records which links it retired in the store; `onComponentsRestored` reactivates exactly those. So a delete that **fails** (node comes back) gets its notes back too.
+- `use-canvas-persistence.ts`: every failed-delete path that restores a node/edge now calls `onComponentsRestored` (single node, group, edge, edge-delete-after-node-failure); "drop both relate legs" now retires its edges' notes in the store and restores them if its delete fails.
+- Still true: the client never flips link state in the database for a node/edge delete; unsynced (never saved) nodes have no row to delete, so any link to them stays `active` in the DB but unreachable.
+- Checks run: `npx tsc --noEmit` and `npm run lint` — clean. Behaviour not tested (yours; `test.md` → Slice S08).

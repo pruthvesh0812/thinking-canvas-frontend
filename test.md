@@ -39,7 +39,7 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 ---
 
 ## Slice S03 — save a note on a node, for real (real canvas, local DB with the 3 backend migrations)
-**Known gap until S08:** deleting a node/edge is still not fully persisted on a real canvas. Edit / delete / Undo are persisted from S04, moving from S07.
+Edit / delete / Undo are persisted from S04, moving from S07, deleting a node/edge from S08.
 1. Focus a node that has text, type a note in the composer, save → the badge shows 1 and the panel lists the note.
 2. Reload → the note, the badge and the panel entry are still there.
 3. Open the same canvas in a second browser → same note and same badge count.
@@ -54,7 +54,7 @@ Mock mode is unchanged (numbers still assigned in the browser) — only check it
 ---
 
 ## Slice S04 — edit, delete and undo a note (real canvas, local DB)
-**Known gap until S08:** deleting a node/edge is still not fully persisted.
+Deleting a node/edge is persisted from S08.
 1. Edit a note in the panel (Edit → change → Save) → the new text shows; reload → the new text is still there; the second browser shows it after a reload.
 2. Edit, then click **Undo** on the "Note edited" toast → the old text returns; reload → still the old text.
 3. Delete a note → the badge count drops and the panel loses it; reload → still gone. In Supabase, the `context_entries` row has `deleted_at` set and its `context_links` row is **unchanged** (`state` still `active`).
@@ -98,6 +98,22 @@ No new code either: `/all` is one `create_context_entry` call with one link per 
 6. Go offline and move → "Couldn't move the note. Try again.", the note stays where it was.
 7. Second browser sees the move after a reload.
 8. Mock mode: move + Undo work as before.
+
+---
+
+## Slice S08 — delete a node/edge that has notes, and "Why remove this?" (real canvas, local DB)
+The notes' links are retired by the **database** (a trigger on the real DELETE, after the 5 s undo window) — the app only mirrors that on screen.
+1. Node with a note: delete it and click **Undo** inside the window → node, number and note are back. Reload → still there (the DB was never touched).
+2. Delete a node with a note and wait out the undo toast → the node is gone. In Supabase the note's `context_links` row now has `state='deleted'`; the `context_entries` row is untouched (`deleted_at` null). Reload → the node and its note are gone.
+3. An `/all` note on n1, n2, n3: delete n2 and wait → the note stays on n1 and n3 (their links stay `active`), n2's link is `deleted`.
+4. Same for an edge with a note: delete it, wait → the edge's link is `state='deleted'`.
+5. Delete a note (panel), delete its node, wait, then Undo the *note* delete (while its toast is up) → the note returns only where its node still exists.
+6. "Why remove this?": delete a node → answer the prompt → "Reason saved". In Supabase `component_removals` has a row: `component_type='node'`, `component_id` = the node id, `component_label` like `n4 · Pricing`, your `reason`. Do the same for an edge.
+7. Select 3 nodes (group delete) and answer the prompt → 3 `component_removals` rows (one per node).
+8. Go offline, delete a node with a note, wait out the window → the node reappears (the delete failed) **and** its note is back on it; no note is lost. Reload once online → consistent.
+9. Delete both legs of an AI "relate" note (the "Drop both links" choice) where an edge had a note → the edge's note link ends `deleted`.
+10. Known limitation: a node you never typed in (no database row) that somehow has a note leaves an unreachable `active` link in the database — invisible in the app. Tell me if you see one surfacing anywhere.
+11. Mock mode: deleting a node still hides its notes; reasons are saved locally.
 
 ---
 

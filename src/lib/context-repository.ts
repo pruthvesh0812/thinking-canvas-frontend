@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import { createEntryRemote, updateEntryRemote, updateLinkRemote } from "@/lib/context-repository-supabase"
+import { createEntryRemote, insertComponentRemovalRemote, updateEntryRemote, updateLinkRemote } from "@/lib/context-repository-supabase"
 import type { ComponentRemoval, ContextEntry, ContextLink } from "@/types"
 
 // Persistence seam for context entries, links, sequence numbers and drafts.
@@ -158,7 +158,9 @@ export const contextRepository: ContextRepository = USE_MOCK_PERSISTENCE
           ...(patch.deleted_at !== undefined && { deleted_at: patch.deleted_at }),
         }),
       updateLink: (_canvasId, linkId, patch) => updateLinkRemote(linkId, patch),
-      setLinksStateForTargets: notPersisted("retiring links of a deleted node/edge (slice S08)"),
-      insertComponentRemoval: notPersisted("the removal reason (slice S08)"),
+      // The database retires a deleted node/edge's links itself (trigger on the
+      // real DELETE) — the client must not flip link state, only its own store.
+      setLinksStateForTargets: () => Promise.resolve(),
+      insertComponentRemoval: (_canvasId, removal) => insertComponentRemovalRemote(removal),
       saveSequence: notPersisted("node numbering (assigned by the database)"),
     }

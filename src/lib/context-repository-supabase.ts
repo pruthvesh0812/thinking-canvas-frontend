@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase"
-import type { ContextEntry, ContextLink, CreateContextEntryArgs } from "@/types"
+import type { ComponentRemoval, ContextEntry, ContextLink, CreateContextEntryArgs } from "@/types"
 
 // Supabase side of the context repository (real canvases). Writes go straight
 // to Supabase over the anon key (RLS = canvas owner); there is NO canvas-event
@@ -59,6 +59,23 @@ export async function updateLinkRemote(
   const { data, error } = await supabase.from("context_links").update(patch).eq("id", linkId).select("id")
   if (error) throw error
   if (!data?.length) throw new Error("update changed no rows")
+}
+
+/** "Why remove this?" — insert-only, stored against the DELETED component's type
+ * and id (no FK: it no longer exists) with a snapshot label. created_by and
+ * created_at are defaulted by the database. */
+export async function insertComponentRemovalRemote(removal: ComponentRemoval): Promise<void> {
+  const { error } = await supabase.from("component_removals").insert({
+    id: removal.id,
+    canvas_id: removal.canvas_id,
+    session_id: removal.session_id,
+    component_type: removal.component_type,
+    component_id: removal.component_id,
+    // The table caps these (label ≤ 500, reason 1–1000).
+    component_label: removal.component_label.slice(0, 500),
+    reason: removal.reason.slice(0, 1000),
+  })
+  if (error) throw error
 }
 
 // PostgREST returns at most 1000 rows per request — page until a short page.

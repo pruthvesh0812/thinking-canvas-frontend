@@ -602,18 +602,39 @@ export function onComponentsRemoved(kind: "node" | "edge", ids: string[], label:
   }
 }
 
-/** The delete was undone: the component, its number and its notes are back
- * (links were never touched); the "Why remove this?" prompt goes away. */
+// Links that onComponentsDeleteCommitted retired in the store, by target id —
+// so a delete that FAILED (the node/edge comes back) can reactivate exactly
+// those and nothing else (a link the user removed or moved stays removed).
+const retiredByCommit = new Map<string, string[]>()
+
+/** The delete was undone — or failed and the component came back: the
+ * component, its number and its notes are back; the "Why remove this?" prompt
+ * goes away. An undo inside the window never reached the database; after a
+ * failed delete the links we retired locally are put back. */
 export function onComponentsRestored(ids: string[]) {
   const s = useContextStore.getState()
   if (s.removalPrompt?.ids.some((id) => ids.includes(id))) s.setRemovalPrompt(null)
+  const back = new Set(ids.flatMap((id) => retiredByCommit.get(id) ?? []))
+  for (const id of ids) retiredByCommit.delete(id)
+  if (back.size === 0) return
+  s.setEntries(
+    s.entries,
+    s.links.map((l) => (back.has(l.id) ? { ...l, state: "active" } : l)),
+  )
 }
 
-/** The delete's undo window elapsed: its notes go with it for good. */
+/** The delete's undo window elapsed: its notes go with it for good. On a real
+ * canvas the database retires the links itself when the row is deleted (a
+ * trigger) — here we only mirror that in the store. Mock mode persists it. */
 export function onComponentsDeleteCommitted(ids: string[], cascadedEdgeIds: string[] = []) {
   void contextRepository.setLinksStateForTargets(canvasKey(), [...ids, ...cascadedEdgeIds], "deleted").catch(() => {})
   const s = useContextStore.getState()
   const gone = new Set([...ids, ...cascadedEdgeIds])
+  for (const l of s.links) {
+    if (l.state === "active" && l.target_id && gone.has(l.target_id)) {
+      retiredByCommit.set(l.target_id, [...(retiredByCommit.get(l.target_id) ?? []), l.id])
+    }
+  }
   s.setEntries(
     s.entries,
     s.links.map((l) => (l.target_id && gone.has(l.target_id) ? { ...l, state: "deleted" } : l)),
