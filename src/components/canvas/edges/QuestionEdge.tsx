@@ -6,7 +6,7 @@ import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
-import { focusFromClick } from "@/hooks/use-context-notes"
+import { focusFromEdgeClick } from "@/hooks/use-context-notes"
 
 // Solid line + arrowhead like LogicalEdge, differentiated only by a small
 // pulsing "Q" badge at the midpoint — the highest-signal human mark: an open
@@ -93,7 +93,7 @@ export function QuestionEdge({
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
           onClick={() => {
             setClicked(true)
-            focusFromClick({ kind: "edge", id })
+            focusFromEdgeClick(id)
           }}
         />
       )}

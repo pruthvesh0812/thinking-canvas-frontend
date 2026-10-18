@@ -48,6 +48,7 @@ export function CanvasContextBar() {
   const [introClosed, setIntroClosed] = useState(false)
   const introVisible = !introDismissed && !introClosed
   const [expanded, setExpanded] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
   const allCount = liveNodeIds ? liveNodeIds.split(",").length : 0
 
   useEffect(() => {
@@ -129,7 +130,11 @@ export function CanvasContextBar() {
         style={{ borderTop: "1px solid var(--tc-hairline)", background: "var(--tc-panel)", color: "var(--tc-chrome)" }}
       >
         <NoteIcon /> Canvas context
-        {count > 0 && <CountBadge count={count} />}
+        {count > 0 && (
+          <span className="rounded-full px-1.5 text-[10.5px] font-semibold" style={{ background: "var(--tc-hairline)", color: "#5F574C" }}>
+            {count}
+          </span>
+        )}
       </div>
     )
   }
@@ -139,53 +144,82 @@ export function CanvasContextBar() {
     : bar.deletedFromLabel
       ? `Draft from deleted ${bar.deletedFromLabel}`
       : null
+  const canSave = text.trim().length > 0 && !saving
+  const editing = expanded || text.length > 0
+  // The explanation lives behind the (i) button; the very first time the bar
+  // is seen it opens by itself once, until dismissed (§5.4).
+  const showInfo = !small && (infoOpen || introVisible)
+
+  function toggleInfo() {
+    if (introVisible) {
+      dismissBarIntro()
+      setIntroClosed(true)
+      setInfoOpen(false)
+    } else setInfoOpen((v) => !v)
+  }
 
   return (
-    <section
-      aria-label="Canvas context notes"
-      className="relative flex-none px-[18px] py-2"
-      style={{ borderTop: "1px solid var(--tc-hairline)", background: "var(--tc-panel)" }}
-    >
-      {introVisible && !small && (
+    <section aria-label="Canvas context notes" className="relative flex-none px-[18px] py-2" style={{ background: "var(--tc-surface)" }}>
+      {showInfo && (
         <div
           role="note"
-          className="mb-2 flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] leading-[1.45]"
-          style={{ background: "var(--tc-surface)", border: "1px solid var(--tc-hairline-strong)", color: "#5F574C" }}
+          className="tc-unfold absolute z-20 w-[320px] rounded-[10px] px-3.5 py-3 text-[12.5px] leading-[1.5]"
+          style={{
+            right: 112,
+            bottom: "calc(100% - 6px)",
+            background: "var(--tc-panel)",
+            border: "1px solid var(--tc-panel-border)",
+            boxShadow: "0 8px 24px rgba(43,38,34,.14)",
+            color: "#5F574C",
+          }}
         >
-          <span className="flex-1">
-            Use this bar for background about the whole canvas — who it&rsquo;s for, what&rsquo;s being decided, what
-            limits apply. It saves notes; it is not a chat and nothing replies. For a note about one node, select the
-            node instead.
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              dismissBarIntro()
-              setIntroClosed(true)
-            }}
-            className="flex-none text-[12px] font-semibold"
-            style={{ border: "none", background: "none", color: "var(--tc-chrome)", cursor: "pointer" }}
-          >
-            Got it
-          </button>
+          Background about the whole canvas: who it&rsquo;s for, what&rsquo;s being decided, what limits apply. It saves
+          notes; it is not a chat and nothing replies. For a note about one node, select the node instead.
+          <div className="mt-2 text-right">
+            <button
+              type="button"
+              onClick={() => {
+                dismissBarIntro()
+                setIntroClosed(true)
+                setInfoOpen(false)
+              }}
+              className="text-[12px] font-semibold"
+              style={{ border: "none", background: "none", color: "var(--tc-focus-ink)", cursor: "pointer" }}
+            >
+              Got it
+            </button>
+          </div>
         </div>
       )}
-      <div className="flex items-start gap-3">
-        <div className="flex flex-none items-center gap-1.5 pt-[5px]" style={{ color: "#6B6257" }}>
-          <NoteIcon size={13} />
-          <div>
-            <div className="text-[12px] font-semibold leading-none">Canvas context</div>
-            {!small && (
-              <div className="mt-1 max-w-[220px] text-[10.5px] leading-[1.35]" style={{ color: "var(--tc-chrome-quiet)" }}>
-                Notes about the whole canvas, not about one node. This is not a chat and nothing will reply.
-              </div>
-            )}
-          </div>
-          <CountBadge count={count} onClick={() => toggleNotesFor(null)} />
-        </div>
-        <div className="relative min-w-0 flex-1">
+      <div
+        className="flex flex-wrap items-start gap-x-2 gap-y-1 rounded-[14px] px-2 py-[7px]"
+        style={{
+          background: "var(--tc-panel)",
+          border: `1px solid ${editing ? "var(--tc-chrome-quiet)" : "var(--tc-panel-border)"}`,
+          boxShadow: "0 1px 2px rgba(43,38,34,.06), 0 6px 18px rgba(43,38,34,.05)",
+          transition: "border-color .16s ease",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => toggleNotesFor(null)}
+          aria-label={`${count} canvas ${count === 1 ? "note" : "notes"} — open in the context panel`}
+          title="Open canvas notes"
+          className="flex h-[34px] flex-none items-center gap-2 rounded-[9px] px-2.5 text-[13px] font-semibold"
+          style={{ border: "1px solid var(--tc-hairline)", background: "var(--tc-surface-quiet)", color: "#5F574C", cursor: "pointer" }}
+        >
+          <NoteIcon size={14} />
+          {small ? null : "Canvas notes"}
+          <span
+            className="flex items-center justify-center rounded-full px-1.5 text-[11.5px] font-semibold"
+            style={{ minWidth: 20, height: 20, background: "var(--tc-hairline)", color: "#5F574C" }}
+          >
+            {count}
+          </span>
+        </button>
+        <div className="relative min-w-0 flex-1" style={{ flexBasis: 200 }}>
           {chip && (
-            <div className="mb-1 flex items-center gap-2 text-[11.5px]">
+            <div className="mb-1 flex items-center gap-2 pt-1 text-[11.5px]">
               <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "var(--tc-hairline)", color: "#5F574C" }}>
                 {chip}
               </span>
@@ -211,19 +245,9 @@ export function CanvasContextBar() {
             onFocus={() => setExpanded(true)}
             onBlur={() => setExpanded(false)}
             aria-label={bar.allMode ? `Note for every node (${allCount})` : "Canvas context note"}
-            placeholder={
-              bar.allMode
-                ? "One note, linked to every node…"
-                : "e.g. This is for the Q3 pricing review — the budget is fixed at $40k."
-            }
-            className="w-full resize-none rounded-lg px-3 py-[6px] text-[13px] outline-none"
-            style={{
-              lineHeight: `${LINE_PX}px`,
-              background: "var(--tc-node)",
-              border: "1px solid var(--tc-hairline-strong)",
-              color: "var(--tc-ink)",
-              overflowY: "auto",
-            }}
+            placeholder={bar.allMode ? "One note, linked to every node…" : "Add background for the whole canvas…"}
+            className="block w-full resize-none border-none bg-transparent px-1.5 py-[7px] text-[14px] outline-none"
+            style={{ lineHeight: `${LINE_PX}px`, color: "var(--tc-ink)", overflowY: "auto" }}
           />
           {input.hashOpen && (
             // Opens upward — the bar sits at the very bottom of the screen.
@@ -232,7 +256,7 @@ export function CanvasContextBar() {
             </div>
           )}
           {failed && (
-            <div className="mt-1 flex items-center gap-2 text-[11.5px]" style={{ color: "#a8422e" }}>
+            <div className="mt-1 flex items-center gap-2 px-1.5 text-[11.5px]" style={{ color: "#a8422e" }}>
               Couldn&rsquo;t save. Your note is still here.
               <button
                 type="button"
@@ -245,32 +269,50 @@ export function CanvasContextBar() {
             </div>
           )}
           {text.trim().length > CONTEXT_SETTINGS.noteMaxChars && (
-            <div className="mt-1 text-[11px]" style={{ color: "#a8422e" }}>
+            <div className="mt-1 px-1.5 text-[11px]" style={{ color: "#a8422e" }}>
               {text.trim().length.toLocaleString()} / {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} — saving keeps
               the first {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} characters; the rest stays here.
             </div>
           )}
-          {!small && (expanded || text) && (
-            <div className="mt-1 text-[10.5px]" style={{ color: "var(--tc-chrome-quiet)" }}>
-              @n2 hands the note to node 2 · #text finds a node · /all writes one note for every node · Enter saves ·
-              Shift+Enter new line · Alt+C jumps here
-            </div>
-          )}
         </div>
+        {!small && (
+          <button
+            type="button"
+            onClick={toggleInfo}
+            aria-label="What is this bar?"
+            aria-expanded={showInfo}
+            className="mt-[2px] flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full"
+            style={{ border: "1px solid var(--tc-hairline-strong)", background: showInfo ? "var(--tc-hairline)" : "transparent", color: "var(--tc-chrome)", cursor: "pointer" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8 7.2v3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="8" cy="5" r=".6" fill="currentColor" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void save()}
-          disabled={!text.trim() || saving}
-          className="mt-[2px] flex-none rounded-lg px-3 py-[6px] text-[12.5px]"
+          disabled={!canSave}
+          className="flex-none rounded-[9px] px-4 text-[13.5px] font-semibold"
           style={{
-            border: "1px solid var(--tc-hairline-strong)",
-            background: text.trim() ? "var(--tc-ink)" : "transparent",
-            color: text.trim() ? "#f5f1e8" : "var(--tc-chrome-quiet)",
-            cursor: text.trim() ? "pointer" : "default",
+            height: 34,
+            border: canSave ? "1px solid var(--tc-ink)" : "1px solid var(--tc-hairline)",
+            background: canSave ? "var(--tc-ink)" : "var(--tc-surface-quiet)",
+            color: canSave ? "#f5f1e8" : "var(--tc-chrome-quiet)",
+            cursor: canSave ? "pointer" : "default",
+            transition: "background .16s ease",
           }}
         >
           Save note
         </button>
+        {!small && editing && (
+          <div className="w-full px-2 pb-0.5 text-[11px]" style={{ color: "var(--tc-chrome-quiet)" }}>
+            @n2 hands the note to node 2 · #text finds a node · /all writes one note for every node · Enter saves ·
+            Shift+Enter new line · Alt+C jumps here
+          </div>
+        )}
       </div>
     </section>
   )
@@ -278,26 +320,4 @@ export function CanvasContextBar() {
 
 function noSubscribe() {
   return () => {}
-}
-
-function CountBadge({ count, onClick }: { count: number; onClick?: () => void }) {
-  if (!onClick) {
-    return (
-      <span className="rounded-full px-1.5 text-[10.5px] font-semibold" style={{ background: "var(--tc-hairline)", color: "#5F574C" }}>
-        {count}
-      </span>
-    )
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`${count} canvas ${count === 1 ? "note" : "notes"} — open in the context panel`}
-      title="Open canvas notes"
-      className="ml-1 rounded-full px-1.5 text-[10.5px] font-semibold"
-      style={{ border: "1px solid var(--tc-hairline-strong)", background: "var(--tc-node)", color: "#5F574C", cursor: "pointer" }}
-    >
-      {count}
-    </button>
-  )
 }

@@ -70,6 +70,9 @@ interface ContextStore {
   nextSeq: number
   dismissedEdgePrompts: string[]
   drafts: Record<string, string>
+  /** One-tap edge badge picked in a note box, keyed like `drafts`. Not
+   * persisted — a badge is only ever the start of the note being written. */
+  badges: Record<string, string | null>
   /** Bumped when system_config has been applied to CONTEXT_SETTINGS, so
    * components that read a setting while rendering re-render. */
   settingsVersion: number
@@ -104,6 +107,7 @@ interface ContextStore {
   bumpSettings: () => void
   setDismissedEdgePrompts: (ids: string[]) => void
   setDraft: (key: string, text: string) => void
+  setBadge: (key: string, badge: string | null) => void
   setFocus: (focus: FocusTarget | null) => void
   setComposer: (composer: ComposerState | null) => void
   setComposerSize: (size: { width: number; height: number } | null) => void
@@ -130,6 +134,7 @@ export const useContextStore = create<ContextStore>()((set) => ({
   nextSeq: 1,
   dismissedEdgePrompts: [],
   drafts: {},
+  badges: {},
   focus: null,
   composer: null,
   composerSize: null,
@@ -147,6 +152,7 @@ export const useContextStore = create<ContextStore>()((set) => ({
     set({
       loadedFor: canvasId,
       ...data,
+      badges: {},
       focus: null,
       composer: null,
       roomOffsets: {},
@@ -165,6 +171,13 @@ export const useContextStore = create<ContextStore>()((set) => ({
       if (text.trim()) drafts[key] = text
       else delete drafts[key]
       return { drafts }
+    }),
+  setBadge: (key, badge) =>
+    set((s) => {
+      const badges = { ...s.badges }
+      if (badge) badges[key] = badge
+      else delete badges[key]
+      return { badges }
     }),
   setFocus: (focus) =>
     set((s) => ({

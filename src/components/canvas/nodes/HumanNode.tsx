@@ -15,7 +15,7 @@ import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useCanvasStore, type CanvasNodeData } from "@/stores/canvas-store"
 import { useContextStore } from "@/stores/context-store"
 import { focusFromClick, focusFromTyping, openComposerAfterNodeText } from "@/hooks/use-context-notes"
-import { ContextBadge } from "@/components/context/ContextBadge"
+import { AddContextButton, ContextBadge } from "@/components/context/ContextBadge"
 
 export type HumanNodeData = CanvasNodeData & {
   width: number
@@ -52,12 +52,18 @@ const DRAG_THRESHOLD_PX = 4
 
 const MIN_WIDTH = 160
 const MAX_WIDTH = 640
-// Baseline node height — enough room for ~3 lines so a fresh node has real
-// presence and clicking to edit never changes its size.
-const MIN_HEIGHT = "4.5em"
-// Pixel equivalent of MIN_HEIGHT (4.5em × 14.5px font ≈ 66) plus the
-// node's vertical padding (py-3 = 24) — the floor for the corner handle.
-const MIN_NODE_HEIGHT_PX = 90
+// Baseline text height — 2 lines; with the padding and the strip reserved for
+// the "+ Add context" button below, a fresh node still has real presence and
+// clicking to edit never changes its size.
+const MIN_HEIGHT = "3em"
+// Pixel equivalent of MIN_HEIGHT (3em × 14.5px font ≈ 44) plus the node's
+// vertical padding (12 top + ADD_STRIP_PX bottom) — the floor for the corner
+// handle.
+const MIN_NODE_HEIGHT_PX = 94
+
+// Bottom strip kept clear of text so the bare "+" at the bottom-right edge
+// never touches the node's content, however long it gets.
+const ADD_STRIP_PX = 38
 
 // Invisible drag strip along the full edge — cursor is the only affordance
 // until hovered, matching the handles' fade-in convention below.
@@ -208,12 +214,13 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
 
   return (
     <div
-      className="relative box-border rounded-[10px] border px-[15px] py-3 text-[14.5px] leading-[1.5] transition-shadow"
+      className="relative box-border rounded-[10px] border px-[15px] pb-0 pt-3 text-[14.5px] leading-[1.5] transition-shadow"
       style={{
         width: data.width,
         // Manual height acts as a floor: the node never shrinks below it,
         // but typing past it still lets the textarea push the wrapper taller.
         minHeight: data.height,
+        paddingBottom: ADD_STRIP_PX,
         // When the top-right chips are present (AI nodes), reserve extra top
         // padding so the content starts below them instead of colliding with
         // the first line. Chips are absolutely positioned from the top edge,
@@ -747,7 +754,7 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           reads independently at a glance. Sit inside the card's top-right
           corner (within the padding, not overhanging the border). */}
       {(data.aiMarker || data.setAside) && (
-        <div className="pointer-events-none absolute flex gap-1" style={{ top: 8, right: 12 }}>
+        <div className="pointer-events-none absolute flex gap-1" style={{ top: 14, right: 12 }}>
           {data.aiMarker && (
             <span
               className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium"
@@ -780,26 +787,32 @@ export function HumanNode({ id, data, selected }: NodeProps<HumanFlowNode>) {
           )}
         </div>
       )}
-      {/* Sequence number (n3) — top right, stable, never reused (§5.3). */}
+      {/* Sequence number (n3) — top left, stable, never reused (§5.3). */}
       {seq !== undefined && (
         <span
           className="pointer-events-none absolute tabular-nums"
-          style={{ top: -17, right: 4, fontSize: 10.5, fontWeight: 600, color: focused ? "var(--tc-focus-ink)" : "var(--tc-chrome-quiet)" }}
+          style={{ top: -17, left: 2, fontSize: 10.5, fontWeight: 600, color: focused ? "var(--tc-focus-ink)" : "var(--tc-chrome-quiet)" }}
           aria-label={`Node n${seq}`}
         >
           n{seq}
         </span>
       )}
-      {/* Note count badge / "Add context" — never note text on the canvas. */}
+      {/* Note count badge on the top-right corner and the bare "+ Add
+          context" at the bottom-right edge — never note text on the canvas. */}
       {!readOnly && (
-        <div className="absolute" style={{ left: 10, bottom: -10, zIndex: 5 }}>
-          <ContextBadge target={{ kind: "node", id }} />
-        </div>
+        <>
+          <div className="absolute" style={{ right: -10, top: -11, zIndex: 5 }}>
+            <ContextBadge target={{ kind: "node", id }} />
+          </div>
+          <div className="absolute" style={{ right: 8, bottom: 6, zIndex: 5 }}>
+            <AddContextButton target={{ kind: "node", id }} />
+          </div>
+        </>
       )}
       {data.seedSource && (
         <span
-          className="pointer-events-none absolute left-0 whitespace-nowrap text-[11.5px]"
-          style={{ top: -20, fontFamily: "var(--font-tc-hand)", color: "var(--tc-chrome-quiet)" }}
+          className="pointer-events-none absolute whitespace-nowrap text-[11.5px]"
+          style={{ left: seq !== undefined ? 34 : 0, top: -20, fontFamily: "var(--font-tc-hand)", color: "var(--tc-chrome-quiet)" }}
           title={
             data.seedSource === "carried_forward"
               ? "Carried forward from your last session"

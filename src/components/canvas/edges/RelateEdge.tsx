@@ -6,7 +6,7 @@ import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
-import { focusFromClick } from "@/hooks/use-context-notes"
+import { focusFromEdgeClick } from "@/hooks/use-context-notes"
 
 // Dashed line with a midpoint ◇ — "how are these two related?" It stays
 // visible while the articulation ghost is still forming (empty frame), and
@@ -94,7 +94,7 @@ export function RelateEdge({
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
           onClick={() => {
             setClicked(true)
-            focusFromClick({ kind: "edge", id })
+            focusFromEdgeClick(id)
           }}
         />
       )}

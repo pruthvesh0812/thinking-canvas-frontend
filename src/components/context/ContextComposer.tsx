@@ -11,27 +11,29 @@ import {
   closeComposer,
   composerBack,
   enterAllMode,
-  saveNote,
-  shortcutExplained,
-  shortTargetLabel,
+  openPanel,
   targetLabel,
 } from "@/hooks/use-context-notes"
 import { useNoteInput } from "@/hooks/use-note-input"
+import { useTargetNote } from "@/hooks/use-target-note"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { CONTEXT_SETTINGS, SMALL_SCREEN_QUERY } from "@/lib/context-settings"
 import { NodeMatchList } from "./NodeMatchList"
+import { BadgeRow, NoteBox } from "./NoteBox"
 
-// The anchored composer (§5.1): one note input, directly below the focused
-// node or at the middle of the focused edge. It lives in flow coordinates
-// (ViewportPortal) so it rides along when its component is dragged, and is
-// counter-scaled so it stays a readable size at any zoom. It never slides —
-// a focus change unmounts it here and mounts it fresh at the new place.
-// On a small screen it docks above the on-screen keyboard instead.
+// The anchored composer (§5.1): one note box. Under a node it is a drawer
+// attached to the node's bottom edge, a few px narrower than the node; on an
+// edge it is a card with a pointer, just below the edge's middle. It lives in
+// flow coordinates (ViewportPortal) so it rides along when its component is
+// dragged, and is counter-scaled so it stays a readable size at any zoom. It
+// never slides — a focus change closes it here (a click elsewhere closes it;
+// the draft is kept). On a small screen it docks above the on-screen keyboard.
 
-const COMPOSER_WIDTH = 300
+const EDGE_COMPOSER_WIDTH = 300
+const NODE_DRAWER_MIN = 220
+const NODE_DRAWER_MAX = 320
+const NODE_DRAWER_INSET = 4
 const POINTER = 7
-const GAP_BELOW_NODE = 10
-const LINE_PX = 20
 
 export function ContextComposer() {
   const composer = useContextStore((s) => s.composer)
@@ -46,26 +48,28 @@ export function ContextComposer() {
   )
 }
 
-/** Flow-space point the composer's pointer touches: bottom-centre of a node,
- * the middle of an edge (its bend point if it has one). */
-function useAnchor(target: FocusTarget): { x: number; y: number } | null {
+/** Flow-space point the composer hangs from: the bottom-centre of a node
+ * (the drawer starts exactly at its bottom edge), the middle of an edge (its
+ * bend point if it has one). `nodeWidth` is the node's flow width. */
+function useAnchor(target: FocusTarget): { x: number; y: number; nodeWidth: number | null } | null {
   const edge = useCanvasStore((s) => (target.kind === "edge" ? s.edges.find((e) => e.id === target.id) : undefined))
   const node = useInternalNode(target.kind === "node" ? target.id : edge?.source ?? "")
   const other = useInternalNode(edge?.target ?? "")
   if (target.kind === "node") {
     if (!node) return null
     const { x, y } = node.internals.positionAbsolute
-    return { x: x + (node.measured.width ?? 0) / 2, y: y + (node.measured.height ?? 0) + GAP_BELOW_NODE }
+    const width = node.measured.width ?? 0
+    return { x: x + width / 2, y: y + (node.measured.height ?? 0), nodeWidth: width }
   }
   if (!edge || !node || !other) return null
-  if (edge.bend) return { x: edge.bend.x, y: edge.bend.y + 12 }
+  if (edge.bend) return { x: edge.bend.x, y: edge.bend.y + 12, nodeWidth: null }
   const center = (n: typeof node) => ({
     x: n.internals.positionAbsolute.x + (n.measured.width ?? 0) / 2,
     y: n.internals.positionAbsolute.y + (n.measured.height ?? 0) / 2,
   })
   const a = center(node)
   const b = center(other)
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 12 }
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 12, nodeWidth: null }
 }
 
 function AnchoredComposer({ target }: { target: FocusTarget }) {
@@ -136,6 +140,13 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
   }, [openedAt, anchor === null])
 
   if (!anchor) return null
+  const isNode = target.kind === "node"
+  const pointer = isNode ? 0 : POINTER
+  // Under a node: node width minus a few px, kept within a readable range at
+  // any zoom (the box itself is counter-scaled, so this is screen px).
+  const width = isNode
+    ? Math.min(NODE_DRAWER_MAX, Math.max(NODE_DRAWER_MIN, (anchor.nodeWidth ?? 0) * zoom - NODE_DRAWER_INSET))
+    : EDGE_COMPOSER_WIDTH
   return (
     <ViewportPortal>
       <div
@@ -150,27 +161,30 @@ function AnchoredComposer({ target }: { target: FocusTarget }) {
           pointerEvents: "all",
         }}
       >
-        {/* Pointer toward the component — colour is never the only cue. */}
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: -POINTER,
-            top: 0,
-            width: 0,
-            height: 0,
-            borderLeft: `${POINTER}px solid transparent`,
-            borderRight: `${POINTER}px solid transparent`,
-            borderBottom: `${POINTER}px solid var(--tc-focus)`,
-          }}
-        />
+        {/* Edge only: a pointer toward the edge — colour is never the only
+            cue. A node's drawer is attached to it, so it needs none. */}
+        {!isNode && (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: -POINTER,
+              top: 0,
+              width: 0,
+              height: 0,
+              borderLeft: `${POINTER}px solid transparent`,
+              borderRight: `${POINTER}px solid transparent`,
+              borderBottom: `${POINTER}px solid var(--tc-focus)`,
+            }}
+          />
+        )}
         <div
           ref={boxRef}
           style={{
             position: "absolute",
-            top: POINTER,
+            top: pointer,
             left: 0,
-            width: COMPOSER_WIDTH,
+            width,
             transform: `translateX(calc(-50% + ${shiftX}px))`,
           }}
         >
@@ -208,40 +222,29 @@ function DockedComposer() {
 }
 
 function ComposerBody({ target }: { target: FocusTarget }) {
-  const key = draftKey(target)
-  const text = useContextStore((s) => s.drafts[key] ?? "")
-  const setDraft = useContextStore((s) => s.setDraft)
   const composer = useContextStore((s) => s.composer)
-  // Re-render the chip when the node's text or number changes.
+  // Re-render the label when the node's text or number changes.
   useCanvasStore((s) => (target.kind === "node" ? s.nodes.find((n) => n.id === target.id)?.data.content : s.edges.length))
   useContextStore((s) => s.seqByNode)
-  // Re-render when system_config has been applied to CONTEXT_SETTINGS.
-  useContextStore((s) => s.settingsVersion)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [saving, setSaving] = useState(false)
-  const [failed, setFailed] = useState(false)
+  const note = useTargetNote(target)
+  const isEdge = target.kind === "edge"
   const label = targetLabel(target)
   const hasPrevious = composer?.previous !== undefined
-  const tooLong = text.trim().length > CONTEXT_SETTINGS.noteMaxChars
 
   async function save() {
-    if (saving || !text.trim()) return
-    setSaving(true)
-    const result = await saveNote(text, [{ kind: target.kind, id: target.id }], shortTargetLabel(target))
-    setSaving(false)
-    if (!result.ok) {
-      // The draft is kept; offer a retry (§8 "Failure").
-      setFailed(true)
-      return
-    }
-    setFailed(false)
-    setDraft(key, result.remainder)
-    if (!result.remainder) closeComposer()
+    if (!(await note.save())) return
+    // Only an overflow keeps the box open (the rest is still in it).
+    if (useContextStore.getState().drafts[draftKey(target)]) return
+    closeComposer()
+    // An edge's first note opens its panel — that is where more are added to
+    // and read from; clicking the edge again reopens this box.
+    if (isEdge) openPanel("notes", "focus")
   }
 
   const input = useNoteInput({
-    text,
-    setText: (t) => setDraft(key, t),
+    text: note.text,
+    setText: note.setText,
     onAimSeq: (seq, rest) => aimAtSeq(seq, rest, { kind: "composer", target }),
     onPickNode: (m, rest) => aimAtNode(m.id, rest, { kind: "composer", target }),
     onAll: (rest) => enterAllMode(rest, target),
@@ -260,23 +263,20 @@ function ComposerBody({ target }: { target: FocusTarget }) {
     el.setSelectionRange(el.value.length, el.value.length)
   }, [composer?.autoFocus, composer?.openedAt])
 
-  // Grows with the text up to [5] lines, then scrolls (§5.1).
-  useLayoutEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, CONTEXT_SETTINGS.composerMaxLines * LINE_PX + 4)}px`
-  }, [text])
-
   return (
     <div
       role="group"
       aria-label={`Note for ${label}`}
-      className="rounded-[10px]"
+      className="tc-unfold flex flex-col gap-1"
       style={{
-        background: "var(--tc-node)",
-        border: "2px solid var(--tc-focus)",
-        boxShadow: "0 8px 24px rgba(43,38,34,.16)",
+        padding: 4,
+        background: "var(--tc-panel)",
+        border: "1px solid var(--tc-focus)",
+        // Under a node the drawer shares the node's bottom edge, so no top
+        // border; an edge's card is closed all round.
+        borderTop: isEdge ? "1px solid var(--tc-focus)" : "none",
+        borderRadius: isEdge ? 12 : "0 0 11px 11px",
+        boxShadow: "0 12px 28px rgba(43,38,34,.12)",
         fontFamily: "var(--font-tc-content)",
       }}
     >
@@ -284,16 +284,21 @@ function ComposerBody({ target }: { target: FocusTarget }) {
       <div aria-live="polite" className="sr-only">
         Writing a note for {label}
       </div>
-      <div className="flex items-center gap-2 px-2.5 pt-2">
-        <span
-          className="inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-          style={{ background: "var(--tc-focus-soft)", color: "var(--tc-focus-ink)" }}
-          title={`This note goes to ${label}`}
-        >
-          <NoteIcon />
-          <span className="truncate">{label}</span>
-        </span>
-        {hasPrevious && (
+      <span id="tc-composer-hint" className="sr-only">
+        Start with @n2 to aim at node 2, #text to find a node, /all for every node. Enter saves, Shift+Enter starts a new line, Escape closes.
+      </span>
+      {/* Only when a shortcut aimed the note somewhere else: say where it
+          goes, and offer the way back. */}
+      {hasPrevious && (
+        <div className="flex items-center gap-2 px-1.5 pt-1">
+          <span
+            className="inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+            style={{ background: "var(--tc-focus-soft)", color: "var(--tc-focus-ink)" }}
+            title={`This note goes to ${label}`}
+          >
+            <NoteIcon />
+            <span className="truncate">{label}</span>
+          </span>
           <button
             type="button"
             onClick={composerBack}
@@ -302,45 +307,35 @@ function ComposerBody({ target }: { target: FocusTarget }) {
           >
             ← back
           </button>
-        )}
-        <button
-          type="button"
-          aria-label="Close note (keeps the draft)"
-          onClick={closeComposer}
-          className="ml-auto px-1 text-[14px] leading-none"
-          style={{ border: "none", background: "none", color: "var(--tc-chrome-quiet)", cursor: "pointer" }}
-        >
-          ×
-        </button>
-      </div>
-      <div className="relative px-2.5 pt-1.5">
-        <textarea
-          ref={textareaRef}
-          value={text}
-          rows={1}
-          onChange={input.onChange}
-          onKeyDown={input.onKeyDown}
-          onSelect={input.onSelect}
-          aria-label={`Note for ${label}`}
-          aria-describedby="tc-composer-hint"
-          placeholder={target.kind === "edge" ? "Why do these connect?" : "Add the why behind this…"}
-          className="w-full resize-none border-none bg-transparent p-0 text-[13.5px] outline-none"
-          style={{ lineHeight: `${LINE_PX}px`, color: "var(--tc-ink)", overflowY: "auto" }}
-        />
+        </div>
+      )}
+      <NoteBox
+        textareaRef={textareaRef}
+        value={note.text}
+        onChange={input.onChange}
+        onKeyDown={input.onKeyDown}
+        onSelect={input.onSelect}
+        label={`Note for ${label}`}
+        describedBy="tc-composer-hint"
+        placeholder={isEdge ? "Why do these connect?" : "Add the why behind this…"}
+        onSave={() => void save()}
+        canSave={note.canSave}
+        maxLines={CONTEXT_SETTINGS.composerMaxLines}
+      >
         {input.hashOpen && (
-          <div className="absolute inset-x-2.5 top-full z-10 mt-1">
+          <div className="absolute inset-x-0 top-full z-10 mt-1">
             <NodeMatchList matches={input.matches} activeIndex={input.hashIndex} onPick={input.pick} />
           </div>
         )}
-      </div>
-      {tooLong && (
-        <div className="px-2.5 pt-1 text-[11px]" style={{ color: "#a8422e" }}>
-          {text.trim().length.toLocaleString()} / {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} — saving keeps the first{" "}
+      </NoteBox>
+      {note.tooLong && (
+        <div className="px-1.5 text-[11px]" style={{ color: "#a8422e" }}>
+          {note.text.trim().length.toLocaleString()} / {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} — saving keeps the first{" "}
           {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} characters; the rest stays here for another note.
         </div>
       )}
-      {failed && (
-        <div className="flex items-center gap-2 px-2.5 pt-1 text-[11.5px]" style={{ color: "#a8422e" }}>
+      {note.failed && (
+        <div className="flex items-center gap-2 px-1.5 text-[11.5px]" style={{ color: "#a8422e" }}>
           Couldn&rsquo;t save. Your note is still here.
           <button
             type="button"
@@ -352,25 +347,11 @@ function ComposerBody({ target }: { target: FocusTarget }) {
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1">
-        <span id="tc-composer-hint" className="truncate text-[10.5px]" style={{ color: "var(--tc-chrome-quiet)" }}>
-          {shortcutExplained() ? "@n2 · #text · /all — Enter saves · Shift+Enter new line · Esc closes" : "Start with @n2 to aim at node 2, #text to find a node, /all for every node"}
-        </span>
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={!text.trim() || saving}
-          className="flex-none rounded-md px-2 py-0.5 text-[11.5px] font-semibold"
-          style={{
-            border: "none",
-            background: text.trim() ? "var(--tc-focus)" : "var(--tc-hairline)",
-            color: text.trim() ? "#fff" : "var(--tc-chrome-quiet)",
-            cursor: text.trim() ? "pointer" : "default",
-          }}
-        >
-          Save note
-        </button>
-      </div>
+      {isEdge && (
+        <div className="px-0.5 pb-0.5 pt-1">
+          <BadgeRow picked={note.picked} onPick={note.setPicked} />
+        </div>
+      )}
     </div>
   )
 }

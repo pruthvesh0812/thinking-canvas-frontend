@@ -6,7 +6,7 @@ import { EdgeDeleteButton } from "./EdgeDeleteButton"
 import { EdgeBendHandle } from "./EdgeBendHandle"
 import { bendPath, unitNormal, type Point } from "./bend-path"
 import { EdgeContextMarkers, useEdgeFocused } from "@/components/context/EdgeContextMarkers"
-import { focusFromClick } from "@/hooks/use-context-notes"
+import { focusFromEdgeClick } from "@/hooks/use-context-notes"
 
 // Solid line, arrowhead — "this follows from that" (CANVAS-RENDERING.md).
 // Clicking anywhere along the line — a wide invisible hit-path underneath
@@ -84,7 +84,7 @@ export function LogicalEdge({
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
           onClick={() => {
             setClicked(true)
-            focusFromClick({ kind: "edge", id })
+            focusFromEdgeClick(id)
           }}
         />
       )}

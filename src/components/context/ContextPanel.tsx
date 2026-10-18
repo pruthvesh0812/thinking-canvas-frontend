@@ -15,9 +15,11 @@ import {
   targetLabel,
 } from "@/hooks/use-context-notes"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { useTargetNote } from "@/hooks/use-target-note"
 import { CONTEXT_SETTINGS, SMALL_SCREEN_QUERY } from "@/lib/context-settings"
 import type { ContextEntry } from "@/types"
 import { NodeMatchList } from "./NodeMatchList"
+import { BadgeRow, NoteBox } from "./NoteBox"
 
 // Quick labels offered on "Why do these connect?" — optional, one tap saves
 // them as the note (§5.6; wording is pm_handoff.md PM-8).
@@ -72,7 +74,7 @@ export function ContextPanel() {
     <aside
       ref={ref}
       aria-label="Context panel"
-      className={`z-[12] flex flex-col ${small ? "fixed inset-0" : "absolute bottom-0 right-0 top-0 w-[320px]"}`}
+      className={`tc-panel-in z-[12] flex flex-col ${small ? "fixed inset-0" : "absolute bottom-0 right-0 top-0 w-[360px]"}`}
       style={{ background: "var(--tc-panel)", borderLeft: "1px solid var(--tc-panel-border)", boxShadow: "-4px 0 16px rgba(43,38,34,.06)" }}
     >
       <div className="flex items-center gap-1 px-3 pt-3" role="tablist">
@@ -159,19 +161,24 @@ function NotesTab() {
           </button>
         )}
       </div>
+      {/* A component's notes can be added to right here; the canvas notes
+          are written in the bar at the bottom. */}
+      {shown && <PanelNoteBox target={shown} />}
       {notes.length === 0 ? (
         <div className="rounded-lg px-3 py-4 text-center text-[12.5px]" style={{ background: "var(--tc-surface)", color: "var(--tc-chrome)" }}>
           {shown ? `No notes on ${heading} yet.` : "No canvas notes yet."}
-          <div className="mt-2">
-            <button
-              type="button"
-              onClick={() => (shown ? openComposer(shown, { autoFocus: true }) : useContextStore.getState().requestBarFocus())}
-              className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
-              style={{ border: "1px solid var(--tc-hairline-strong)", background: "var(--tc-node)", color: "var(--tc-ink)", cursor: "pointer" }}
-            >
-              Add context
-            </button>
-          </div>
+          {!shown && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => useContextStore.getState().requestBarFocus()}
+                className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
+                style={{ border: "1px solid var(--tc-hairline-strong)", background: "var(--tc-node)", color: "var(--tc-ink)", cursor: "pointer" }}
+              >
+                Add context
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -180,6 +187,49 @@ function NotesTab() {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+// The panel's own note box — same draft, same Save, same edge badges as the
+// box under the component, so typing in one shows in the other. Saving keeps
+// the panel open and the new note drops into the list below.
+function PanelNoteBox({ target }: { target: FocusTarget }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const note = useTargetNote(target)
+  const isEdge = target.kind === "edge"
+  const label = targetLabel(target)
+  return (
+    <div className="mb-3 flex flex-col gap-2">
+      <NoteBox
+        roomy
+        textareaRef={textareaRef}
+        value={note.text}
+        onChange={(e) => note.setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
+            e.preventDefault()
+            void note.save()
+          }
+        }}
+        label={`Add a note to ${label}`}
+        placeholder={isEdge ? "Why do these connect?" : "Add background, a source or a constraint…"}
+        onSave={() => void note.save()}
+        canSave={note.canSave}
+        maxLines={CONTEXT_SETTINGS.composerMaxLines}
+      />
+      {note.tooLong && (
+        <div className="text-[11px]" style={{ color: "#a8422e" }}>
+          {note.text.trim().length.toLocaleString()} / {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} — saving keeps the first{" "}
+          {CONTEXT_SETTINGS.noteMaxChars.toLocaleString()} characters; the rest stays here for another note.
+        </div>
+      )}
+      {note.failed && (
+        <div className="text-[11.5px]" style={{ color: "#a8422e" }}>
+          Couldn&rsquo;t save. Your note is still here — try again.
+        </div>
+      )}
+      {isEdge && <BadgeRow picked={note.picked} onPick={note.setPicked} />}
     </div>
   )
 }

@@ -100,16 +100,23 @@ export function closeComposer() {
   useContextStore.getState().setComposer(null)
 }
 
-/** Click on a component. Focuses it; only if a composer is already open does
- * a composer follow (§5.2 "Following focus"), and that one never steals the
- * caret. With no composer open nothing on the canvas shifts. */
+/** Click on a component. Focuses it. An open composer belongs to the
+ * component it opened for: a click on anything else closes it (the draft is
+ * kept), so it never follows focus around the canvas. */
 export function focusFromClick(target: FocusTarget) {
   const s = useContextStore.getState()
   if (sameTarget(s.focus, target)) return
   s.setFocus(target)
-  if (s.composer && !sameTarget(s.composer.target, target)) {
-    openComposer(target, { autoFocus: false })
-  }
+  if (s.composer && !sameTarget(s.composer.target, target)) closeComposer()
+}
+
+/** Click on an edge: focus it and open its note box at the middle of the
+ * edge. Clicking the edge whose box is already open leaves it as is. */
+export function focusFromEdgeClick(edgeId: string) {
+  const target: FocusTarget = { kind: "edge", id: edgeId }
+  const s = useContextStore.getState()
+  if (sameTarget(s.composer?.target, target)) return
+  openComposer(target, { autoFocus: true })
 }
 
 /** Typing inside a node focuses it, nothing more. */

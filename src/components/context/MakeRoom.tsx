@@ -6,8 +6,10 @@ import { useCanvasStore } from "@/stores/canvas-store"
 import { useContextStore } from "@/stores/context-store"
 import { computeRoomOffsets } from "@/lib/make-room"
 
-const GAP_BELOW_NODE = 10
-const POINTER = 7
+// A node's note box is attached to its bottom edge (no gap, no pointer); an
+// edge's card hangs off a pointer.
+const GAP_BELOW_NODE = 0
+const EDGE_POINTER = 7
 const ROOM_GAP_PX = 12
 
 // Renders nothing — computes which components the open composer would cover
@@ -64,7 +66,7 @@ export function MakeRoom({ disabled }: { disabled: boolean }) {
     if (!anchor) return publish({})
 
     const width = size.width / zoom
-    const blocker = { x: anchor.x - width / 2, y: anchor.y, width, height: (size.height + POINTER) / zoom }
+    const blocker = { x: anchor.x - width / 2, y: anchor.y, width, height: (size.height + (composer.target.kind === "edge" ? EDGE_POINTER : 0)) / zoom }
     const candidates = storeNodes
       .filter((n) => !fixed.has(n.id))
       .map((n) => rectOf(n.id))
