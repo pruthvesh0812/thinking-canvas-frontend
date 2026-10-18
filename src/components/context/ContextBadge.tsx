@@ -9,8 +9,9 @@ import { NoteIcon } from "./ContextComposer"
 // (§5.5): the note icon and the number. A dot means an unsaved draft. Clicking
 // opens the context panel on that component's notes (clicking again closes
 // it). The badge is filled while the panel shows this component's notes.
-// Hovering (or keyboard-focusing) it shows the latest note in a small bubble —
-// a peek, never a place to read or edit; the panel is for that.
+// On an edge's chip only, hovering (or keyboard-focusing) it shows the latest
+// note in a small bubble — a peek, never a place to read or edit; the panel is
+// for that. A node's badge stays text-free (§5.5).
 export function ContextBadge({ target, style, showEmpty }: { target: FocusTarget; style?: React.CSSProperties; showEmpty?: boolean }) {
   const count = useContextStore((s) => noteCount(s, target.kind, target.id))
   const hasDraft = useContextStore((s) => !!s.drafts[draftKey(target)]?.trim())
@@ -18,6 +19,7 @@ export function ContextBadge({ target, style, showEmpty }: { target: FocusTarget
     (s) => s.panel.open && s.panel.tab === "notes" && s.panel.view === "focus" && s.focus?.kind === target.kind && s.focus.id === target.id,
   )
   const name = target.kind === "node" ? seqLabel(target.id) : "this edge"
+  const isEdge = target.kind === "edge"
   const latest = useContextStore((s) => notesFor(s, target.kind, target.id)[0]?.content ?? "")
   const [peek, setPeek] = useState(false)
   // Pops when a note is added, not on first render.
@@ -39,10 +41,11 @@ export function ContextBadge({ target, style, showEmpty }: { target: FocusTarget
     <button
       type="button"
       data-edge-chip
-      onMouseEnter={() => setPeek(true)}
+      onMouseEnter={() => setPeek(isEdge)}
       onMouseLeave={() => setPeek(false)}
-      onFocus={() => setPeek(true)}
+      onFocus={() => setPeek(isEdge)}
       onBlur={() => setPeek(false)}
+      title={isEdge ? undefined : hasDraft ? "Notes — you have an unsaved draft here" : "Open notes"}
       className={`nodrag nopan relative flex items-center gap-[5px] rounded-full text-[12px] font-bold ${pop ? "tc-pop" : ""}`}
       aria-label={
         count === 0 && !hasDraft
@@ -70,7 +73,7 @@ export function ContextBadge({ target, style, showEmpty }: { target: FocusTarget
         toggleNotesFor(target)
       }}
     >
-      {peek && !open && latest && <LatestBubble text={latest} more={count - 1} edge={target.kind === "edge"} />}
+      {isEdge && peek && !open && latest && <LatestBubble text={latest} more={count - 1} />}
       {count === 0 && !hasDraft ? (
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
           <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
@@ -139,7 +142,7 @@ export function EdgeQuestionMark({ edgeId, style }: { edgeId: string; style?: Re
 // The latest note, in a small rectangular bubble with a caret toward the
 // badge. Under a node's corner badge; to the right of an edge's chip (above
 // and below it sit the delete button and the bend dot). Never takes the pointer.
-function LatestBubble({ text, more, edge }: { text: string; more: number; edge: boolean }) {
+function LatestBubble({ text, more }: { text: string; more: number }) {
   return (
     <span
       role="tooltip"
@@ -155,7 +158,9 @@ function LatestBubble({ text, more, edge }: { text: string; more: number; edge: 
         fontSize: 12.5,
         fontWeight: 400,
         lineHeight: 1.45,
-        ...(edge ? { left: "calc(100% + 10px)", top: "50%", transform: "translateY(-50%)" } : { right: 8, top: "calc(100% + 9px)" }),
+        left: "calc(100% + 10px)",
+        top: "50%",
+        transform: "translateY(-50%)",
       }}
     >
       <span
@@ -166,9 +171,10 @@ function LatestBubble({ text, more, edge }: { text: string; more: number; edge: 
           height: 9,
           background: "var(--tc-node)",
           transform: "rotate(45deg)",
-          ...(edge
-            ? { left: -5, top: "calc(50% - 4px)", borderLeft: "1px solid var(--tc-node-border)", borderBottom: "1px solid var(--tc-node-border)" }
-            : { right: 22, top: -5, borderLeft: "1px solid var(--tc-node-border)", borderTop: "1px solid var(--tc-node-border)" }),
+          left: -5,
+          top: "calc(50% - 4px)",
+          borderLeft: "1px solid var(--tc-node-border)",
+          borderBottom: "1px solid var(--tc-node-border)",
         }}
       />
       <span className="block whitespace-pre-wrap break-words" style={{ display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
