@@ -53,6 +53,7 @@ Two rules fall out of this:
 | `ghost-store` | pending pairs keyed by `trigger_node_id`, streamed text, `streamed` flag | anything persisted |
 | `observer-store` | revealed structures, per-edge accept/reject state | ghost pairs |
 | `session-store` | canvas meta (`original_intent`, title), active session id, `current_phase`, debounce-indicator state | node/edge data |
+| `intervention-store` | pending intervention offers keyed by `trigger_node_id` (the presentation gate: `waiting`/`offer`/`withdraw`) | ghost pairs, anything persisted — a materialized ghost is ghost-store's job once `/process` fires the real spawn |
 
 Cross-store reads happen in hooks/components — stores never import each other.
 

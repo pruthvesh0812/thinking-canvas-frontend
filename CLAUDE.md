@@ -30,6 +30,7 @@ crosses into the real canvas without a deliberate human action.
 
 | Task | Load these files |
 |---|---|
+| Product understanding — what/why/who, status, loopholes, killers; marketing, support, strategy | `../thinking-canvas-be/.ai/product/README.md` → `00-product-at-a-glance.md` (single source of truth lives in the backend repo) |
 | Any canvas work (nodes/edges/React Flow) | `CORE-CONCEPTS.md` + `CANVAS-RENDERING.md` |
 | Ghost nodes / SSE / streaming / accept-reject | `CORE-CONCEPTS.md` + `GHOST-STREAMING.md` |
 | Calling the backend / payload shapes / endpoints | `API-CONTRACT.md` |
@@ -47,6 +48,8 @@ crosses into the real canvas without a deliberate human action.
 | Backend contract changed / types out of date | `.ai/skills/sync-contract-types.md` |
 | External library question | `.ai/refs/EXTERNAL-DOCS.md` |
 | What to build next / story order | `IMPLEMENTATION-ORDER.md` |
+| A feature just hit its Definition of Done | `.ai/skills/code-alignment-doc.md` |
+| Debugging / optimizing / "show me the real code" one step at a time | `.ai/skills/stepping-stones.md` |
 
 ---
 
@@ -173,6 +176,8 @@ thinking-canvas-web/
 10. **Unknown SSE message types are ignored gracefully** — the protocol will grow (intervention-spectrum adds `waiting`/`offer`/`withdraw`). Never throw on an unrecognized `type`.
 11. **Every hook, store, and API call logs via `logger`** from `src/lib/logger.ts` — never `console.log` directly.
 12. **npm only** — no pnpm, yarn, or bun.
+13. **Comments are written in plain, human-intuitive words** — short sentences, everyday language, no jargon-stacking. The human reading it should get it in one pass, no re-read. Full rule + before/after example in `CODING-STANDARDS.md` → "Comments — Write for the Next Reader".
+14. **Every completed feature closes with a code-alignment session** — before marking a story done, write a plain-language walkthrough doc (same shape as `.ai/context/INTERVENTION-SPECTRUM.md`) and walk the human through it, so the feature's decisions and logic live in their head, not just in the diff. See `.ai/skills/code-alignment-doc.md`.
 
 ---
 
@@ -222,3 +227,5 @@ context files to load. Feature stories live in `.ai/features/<name>/story.md`.
 | Create Zustand store | `.ai/skills/create-zustand-store.md` | Adding any store in `src/stores/` |
 | Add backend API call | `.ai/skills/add-api-call.md` | Adding any call in `src/lib/api.ts` |
 | Sync contract types | `.ai/skills/sync-contract-types.md` | Backend types changed / starting contract work |
+| Code-alignment doc + session | `.ai/skills/code-alignment-doc.md` | A feature's Definition of Done is met — before calling the story finished |
+| Stepping-stones walkthrough | `.ai/skills/stepping-stones.md` | Human wants to walk real code function-by-function — debugging, optimizing, or just looking at the lowest level |

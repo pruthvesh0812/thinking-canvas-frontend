@@ -24,11 +24,21 @@ import { useCanvasUiStore } from "@/stores/canvas-ui-store"
 import { useGhostStore, hasQuestionGhost, type GhostPairState } from "@/stores/ghost-store"
 import { useSessionStore } from "@/stores/session-store"
 import { useInterventionDemo } from "@/hooks/use-intervention-demo"
+import { useIntervention } from "@/hooks/use-intervention"
+import { useInterventionTrigger } from "@/hooks/use-intervention-trigger"
 import { useCanvasPersistence } from "@/hooks/use-canvas-persistence"
 import { useGhostStream } from "@/hooks/use-ghost-stream"
 import { MOCK_INTERVENTION } from "@/lib/mock-intervention-scenario"
 import { backdropPaneStyle, gridDotColor } from "@/lib/canvas-backdrop"
-import { GHOST_WIDTH, ghostPositions, ghostPositionsFromEdge, relateAnchorSourceHandle } from "@/lib/ghost-layout"
+import {
+  GHOST_WIDTH,
+  contentNodeRect,
+  ghostCardRect,
+  ghostPositions,
+  ghostPositionsFromEdge,
+  relateAnchorSourceHandle,
+  type Rect,
+} from "@/lib/ghost-layout"
 
 import { BackdropSwitcher } from "./BackdropSwitcher"
 import { HumanNode, type HumanFlowNode } from "./nodes/HumanNode"
@@ -44,6 +54,7 @@ import { CanvasFooter } from "./CanvasFooter"
 import { PenRack } from "./PenRack"
 import { OpenThreadsRail } from "./OpenThreadsRail"
 import { DebounceIndicator } from "./DebounceIndicator"
+import { InterventionOfferCard } from "./InterventionOfferCard"
 import { HistoryBar } from "./HistoryBar"
 import { SessionInsightsPanel } from "../session/SessionInsightsPanel"
 import { SessionCompleteModal } from "../session/SessionCompleteModal"
@@ -173,12 +184,32 @@ function CanvasInner() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [isHistory, selectedNodeIds, groupDeleteConfirm])
 
-  const { phase, remaining, paused, trigger, reset, togglePause, processNow } = useInterventionDemo()
+  const demo = useInterventionDemo()
+  // The real, backend-driven presentation gate: use-intervention-trigger.ts
+  // watches for settled node commits and calls POST /intervention/trigger;
+  // use-intervention.ts turns the resulting waiting/offer/withdraw SSE
+  // traffic (intervention-store) into the same phase/timer shape the demo
+  // hook produces, but backed by real POST /intervention/process|dismiss
+  // calls instead of local setTimeouts.
+  const intervention = useIntervention()
+  useInterventionTrigger(!isHistory)
   // The seeded demo scenario anchors to a specific node id — only offer it
   // on canvases that actually have that node (a freshly created canvas
   // starts empty, per north-star capture's resetToEmpty()).
   const hasInterventionScenario =
     !isHistory && storeNodes.some((n) => n.id === MOCK_INTERVENTION.trigger_node_id)
+  // The demo (manual QA button below) and the real hook can't actually
+  // collide — the demo drives ghost-store directly and never touches
+  // intervention-store — but DebounceIndicator is a single shared overlay,
+  // so only one phase machine can drive it at a time. The demo commandeers
+  // it for as long as it's actively running; otherwise the real,
+  // backend-driven gate owns it.
+  const usingDemoIndicator = demo.phase !== "idle"
+  const indicatorPhase = usingDemoIndicator ? demo.phase : intervention.phase
+  const indicatorRemaining = usingDemoIndicator ? demo.remaining : intervention.remaining
+  const indicatorPaused = usingDemoIndicator ? demo.paused : intervention.paused
+  const indicatorTogglePause = usingDemoIndicator ? demo.togglePause : intervention.togglePause
+  const indicatorProcessNow = usingDemoIndicator ? demo.processNow : intervention.processNow
 
   // Honest time-travel: the viewed session at full presence, everything
   // earlier dimmed as context, everything later absent — it didn't exist
@@ -244,6 +275,20 @@ function CanvasInner() {
 
     const nodesById = new Map(visibleStoreNodes.map((n) => [n.id, n]))
     const ghostNodes: (GhostContextFlowNode | GhostQuestionFlowNode)[] = []
+    // Every real node is a potential obstacle a ghost pair must clear
+    // (ghost-layout.ts's settleClearOfObstacles) — keyed by id so a pair can
+    // cheaply exclude its OWN trigger/anchor node(s) below (the ghost is
+    // SUPPOSED to sit right next to those, inside the normal gap).
+    const realNodeRectsById = new Map(
+      visibleStoreNodes.map((n) => [n.id, contentNodeRect(n.position.x, n.position.y, n.width, n.data.content, n.height)]),
+    )
+    // Ghost pairs already placed earlier in this same loop — so a second
+    // (rare, but possible: one pending pair per node, and several nodes can
+    // each have one at once) concurrent pair doesn't land on top of the
+    // first. Order-dependent (first pair in iteration order wins the
+    // uncontested spot), which is an acceptable tradeoff for how rare
+    // concurrent pairs are.
+    const placedGhostRects: Rect[] = []
     for (const [triggerNodeId, pair] of Object.entries(pairs)) {
       // A `relate`-triggered Articulator pair hangs below the midpoint of its
       // edge's two endpoints, not next to a single trigger node. Its diamond
@@ -251,7 +296,28 @@ function CanvasInner() {
       // anchor node — and the ghost's drop-lines (edges memo below) run from
       // BOTH endpoints straight to the ghost card.
       const endpoints = relateEndpoints(pair, nodesById)
-      const pos = endpoints ? ghostPositionsFromEdge(endpoints) : ghostPositions(nodesById.get(triggerNodeId))
+      // Articulator readings render as a list, not the raw marker-tagged
+      // text, but they take up the same vertical space — estimate against
+      // whichever one is actually on screen (GhostNodeCard's own branch).
+      const contextDisplayText = pair.articulations ? pair.articulations.join("\n") : pair.contextText
+      const questionDisplayText = hasQuestionGhost(pair) ? pair.questionText : undefined
+      // Acceptance reuses a ghost's own id for the real node it materializes
+      // into (use-canvas-persistence.ts), and only removes the pair from
+      // ghost-store afterward — so for one brief render, BOTH a real node and
+      // this ghost can exist at the same id. Without excluding them, the
+      // ghost sees its own just-materialized self sitting exactly where it
+      // wants to be, dodges it, and then snaps back the instant the pair
+      // resolves — the flicker/jump this guards against.
+      const ownGhostIds = [pair.descriptor.context_node.ghost_id, pair.descriptor.question_node?.ghost_id]
+      const excludedIds = new Set([...pair.anchorNodeIds, ...ownGhostIds])
+      const obstacles = [
+        ...[...realNodeRectsById.entries()].filter(([id]) => !excludedIds.has(id)).map(([, rect]) => rect),
+        ...placedGhostRects,
+      ]
+      const pos = endpoints
+        ? ghostPositionsFromEdge(endpoints, contextDisplayText, questionDisplayText, obstacles)
+        : ghostPositions(nodesById.get(triggerNodeId), contextDisplayText, questionDisplayText, obstacles)
+      placedGhostRects.push(ghostCardRect(pos.context.x, pos.context.y, GHOST_WIDTH.context, contextDisplayText))
       ghostNodes.push({
         id: pair.descriptor.context_node.ghost_id,
         type: "ghostContext",
@@ -267,7 +333,8 @@ function CanvasInner() {
         deletable: false,
         style: { width: GHOST_WIDTH.context },
       })
-      if (hasQuestionGhost(pair)) {
+      if (questionDisplayText !== undefined) {
+        placedGhostRects.push(ghostCardRect(pos.question.x, pos.question.y, GHOST_WIDTH.question, questionDisplayText))
         ghostNodes.push({
           id: pair.descriptor.question_node!.ghost_id,
           type: "ghostQuestion",
@@ -350,6 +417,7 @@ function CanvasInner() {
             source: a.id,
             sourceHandle: relateAnchorSourceHandle(a.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
+            targetHandle: "left-target",
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
           },
@@ -358,6 +426,7 @@ function CanvasInner() {
             source: b.id,
             sourceHandle: relateAnchorSourceHandle(b.id, originalEdge),
             target: pair.descriptor.context_node.ghost_id,
+            targetHandle: "left-target",
             type: "ghostEdge",
             data: { pairKey: triggerNodeId, slot: "context" },
           },
@@ -366,7 +435,12 @@ function CanvasInner() {
         ghostEdges.push({
           id: `ge-${triggerNodeId}-${pair.descriptor.context_node.ghost_id}`,
           source: triggerNodeId,
+          // The context ghost always sits to the trigger's right
+          // (ghost-layout.ts) — leave from the trigger's right side, enter
+          // the ghost's left.
+          sourceHandle: "right-source",
           target: pair.descriptor.context_node.ghost_id,
+          targetHandle: "left-target",
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "context" },
         })
@@ -375,7 +449,11 @@ function CanvasInner() {
         ghostEdges.push({
           id: `ge-${pair.descriptor.context_node.ghost_id}-${pair.descriptor.question_node!.ghost_id}`,
           source: pair.descriptor.context_node.ghost_id,
+          // The question ghost always sits to the context ghost's right
+          // (ghost-layout.ts) — same left-to-right handle pairing.
+          sourceHandle: "right-source",
           target: pair.descriptor.question_node!.ghost_id,
+          targetHandle: "left-target",
           type: "ghostEdge",
           data: { pairKey: triggerNodeId, slot: "question" },
         })
@@ -466,26 +544,26 @@ function CanvasInner() {
         <div className="flex items-center gap-2.5 px-5 py-2" style={{ borderBottom: "1px solid var(--tc-hairline)" }}>
           <button
             type="button"
-            onClick={trigger}
-            disabled={phase !== "idle"}
+            onClick={demo.trigger}
+            disabled={demo.phase !== "idle"}
             className="rounded-full px-[15px] py-1.5 text-xs font-semibold"
-            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: phase === "idle" ? 1 : 0.5 }}
+            style={{ border: "none", background: "var(--tc-ink)", color: "#F5F1E8", opacity: demo.phase === "idle" ? 1 : 0.5 }}
           >
             ▶ Run the intervention
           </button>
           <button
             type="button"
-            onClick={reset}
+            onClick={demo.reset}
             className="rounded-full px-[13px] py-1 text-xs"
             style={{ background: "none", border: "1px solid rgba(43,38,34,.25)", color: "#6B6257" }}
           >
             Reset
           </button>
           <span className="text-[11.5px]" style={{ color: "var(--tc-chrome)" }}>
-            {phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
-            {phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
-            {phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
-            {phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
+            {demo.phase === "idle" && "Plays on the node “Onboarding ends on day 7.”"}
+            {demo.phase === "shimmer" && "Something was noticed — the one-shot scan shimmer."}
+            {demo.phase === "waiting" && "The AI asks permission: pause it, pull it forward with “now,” or keep working."}
+            {demo.phase === "generating" && "Composing — nothing appears on the canvas until you ask."}
           </span>
         </div>
       )}
@@ -553,11 +631,18 @@ function CanvasInner() {
             control), not floating over the pane. */}
         {!isHistory && (
           <div className="pointer-events-none absolute inset-0">
-            <DebounceIndicator phase={phase} remaining={remaining} paused={paused} togglePause={togglePause} processNow={processNow} />
+            <DebounceIndicator
+              phase={indicatorPhase}
+              remaining={indicatorRemaining}
+              paused={indicatorPaused}
+              togglePause={indicatorTogglePause}
+              processNow={indicatorProcessNow}
+            />
           </div>
         )}
         {!isHistory && <PenRack />}
         {!isHistory && <OpenThreadsRail />}
+        {!isHistory && <InterventionOfferCard />}
         <SessionInsightsPanel />
 
         {/* Group delete confirm (2+ nodes selected, Backspace/Delete) — one

@@ -27,14 +27,20 @@ export function GhostContextNode({ data }: NodeProps<GhostContextFlowNode>) {
     <>
       {/* A ghost card is never user-connectable, but it IS a drop-line
           target — GhostEdge (and, for a `relate` pair, TWO of them at once,
-          one per endpoint) connects here without naming a handle id. With
-          zero handles React Flow can resolve a single incoming edge by
-          falling back to the node's center, but a second concurrent edge to
-          the same handle-less target fails to resolve ("Couldn't create
-          edge for target handle id: null") and never renders. One inert
-          target handle gives every drop-line a real handle to resolve,
-          however many there are. */}
-      <Handle type="target" position={Position.Top} style={{ opacity: 0, pointerEvents: "none" }} />
+          one per endpoint) always targets this one named handle
+          ("left-target"). A node-triggered spawn sits to the trigger's
+          right, so its drop-line enters here from the left; a `relate`
+          pair's two drop-lines share it too (Canvas.tsx passes the same id
+          for both). Naming it (rather than leaving it handle-less) is also
+          what makes a SECOND concurrent edge to this node resolve at all —
+          two edges to an unnamed target fail ("Couldn't create edge for
+          target handle id: null") and never render. */}
+      <Handle type="target" id="left-target" position={Position.Left} style={{ opacity: 0, pointerEvents: "none" }} />
+      {/* The context ghost is also the SOURCE of the drop-line to its own
+          question card, sitting to ITS right — a named source handle here is
+          required for that edge to resolve at all (this node had no source
+          handle of any kind before, so that edge silently failed to render). */}
+      <Handle type="source" id="right-source" position={Position.Right} style={{ opacity: 0, pointerEvents: "none" }} />
       <GhostNodeCard
         triggerNodeId={data.triggerNodeId}
         slot="context"
